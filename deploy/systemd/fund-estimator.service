@@ -1,0 +1,19 @@
+[Unit]
+Description=Fund estimator FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fundestimator
+Group=fundestimator
+WorkingDirectory=/opt/fund-estimator
+Environment=FUND_ESTIMATOR_FORCE_MOCK=0
+Environment=FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK=0
+Environment=FUND_ESTIMATOR_DB=/var/lib/fund-estimator/fund_estimator.sqlite3
+ExecStart=/opt/fund-estimator/.venv/bin/python -m uvicorn fund_estimator.api.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
