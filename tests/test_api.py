@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import importlib
+
+from fastapi.testclient import TestClient
+
+from fund_estimator.services.cache import SQLiteCache
+
+
+def make_client(tmp_path, monkeypatch) -> TestClient:
+    monkeypatch.setenv("FUND_ESTIMATOR_FORCE_MOCK", "1")
+    monkeypatch.setenv("FUND_ESTIMATOR_DB", str(tmp_path / "api.sqlite3"))
+    module = importlib.import_module("fund_estimator.api.app")
+    return TestClient(module.create_app())
+
+
+def test_health(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+    source_response = client.get("/api/source/status")
+    assert source_response.status_code == 200
+    assert source_response.json()["mode"] == "mock"
+
+
+def test_default_page_can_switch_to_compare(tmp_path, monkeypatch):
+    monkeypatch.setenv("FUND_ESTIMATOR_DEFAULT_PAGE", "compare")
+    client = make_client(tmp_path, monkeypatch)
+
+    root_response = client.get("/")
+    monitor_response = client.get("/monitor")
+    compare_response = client.get("/compare")
+
+    assert root_response.status_code == 200
+    assert "基金对比器" in root_response.text
+    assert monitor_response.status_code == 200
+    assert "套利监控" in monitor_response.text
+    assert compare_response.status_code == 200
+    assert "基金对比器" in compare_response.text
+
+
+def test_estimate_and_watchlist(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    add_response = client.post("/api/watchlist/001438")
+    assert add_response.status_code == 200
+    assert add_response.json()["code"] == "001438"
+
+    watch_response = client.get("/api/watchlist")
+    assert watch_response.status_code == 200
+    assert len(watch_response.json()) == 1
+
+    estimate_response = client.get("/api/estimate?code=001438&mode=both")
+    body = estimate_response.json()
+    assert estimate_response.status_code == 200
+    assert body["fund_code"] == "001438"
+    assert body["raw"] is not None
+    assert body["normalized"] is not None
+    assert body["confidence"] in {"high", "medium", "low"}
+    assert body["actual_change_pct"] == 3.03
+    assert body["fund_details"]["stage_returns"]["one_month_pct"] == 18.6
+    assert body["fund_details"]["asset_allocation"]["stock_pct"] == 86.2
+    assert body["fund_details"]["managers"][0]["name"] == "示例经理"
+
+
+def test_watchlist_reorder(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    cache = SQLiteCache(tmp_path / "api.sqlite3")
+    cache.add_watchlist("000001", "测试一号")
+    cache.add_watchlist("001438", "测试二号")
+
+    response = client.put("/api/watchlist/order", json={"codes": ["001438", "000001"]})
+    assert response.status_code == 200
+    assert [item["code"] for item in response.json()] == ["001438", "000001"]
+
+    watch_response = client.get("/api/watchlist")
+    assert [item["code"] for item in watch_response.json()] == ["001438", "000001"]
+
+
+def test_watchlist_is_scoped_by_device(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    response = client.post("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
+    assert response.status_code == 200
+
+    phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
+    phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
+
+    assert [item["code"] for item in phone_a.json()] == ["001438"]
+    assert phone_b.json() == []
+
+
+def test_new_device_copies_legacy_default_watchlist_once(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    cache = SQLiteCache(tmp_path / "api.sqlite3")
+    cache.add_watchlist("001438", "旧自选")
+
+    first_open = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
+    assert [item["code"] for item in first_open.json()] == ["001438"]
+
+    delete_response = client.delete("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
+    assert delete_response.status_code == 200
+
+    phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
+    default_list = client.get("/api/watchlist")
+    phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
+
+    assert phone_a.json() == []
+    assert [item["code"] for item in default_list.json()] == ["001438"]
+    assert [item["code"] for item in phone_b.json()] == ["001438"]
+
+
+def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    response = client.post("/api/estimate/batch", json={"codes": ["001438", "999999"], "mode": "both"})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body[0]["ok"] is True
+    assert body[1]["ok"] is False
+    assert body[1]["error"]["code"] == "FUND_NOT_FOUND"
+
+
+def test_compare_api_returns_mock_comparison(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/compare",
+        json={"codes": ["001438", "001439"], "strategy": "balanced", "theme_hint": "混合"},
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["conclusion"] == "very_similar"
+    assert body["recommendation_code"] in {"001438", "001439"}
+    assert len(body["funds"]) == 2
+    assert body["pair_similarities"][0]["holdings_similarity"] > 90
+    assert "estimated_move" not in body["funds"][0]["score_breakdown"]
+    assert "fee" not in body["funds"][0]["score_breakdown"]
+    assert any(item["key"] == "manager" for item in body["score_factors"])
+    assert all(item["key"] != "fee" for item in body["score_factors"])
+    assert body["funds"][0]["snapshot"]["current_rate_pct"] is not None
+    assert "purchase_limit_yuan" in body["funds"][0]["snapshot"]
+
+
+def test_compare_api_validates_codes(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    duplicate_response = client.post("/api/compare", json={"codes": ["001438", "001438"]})
+    missing_response = client.post("/api/compare", json={"codes": ["001438", "999999"]})
+
+    assert duplicate_response.status_code == 422
+    assert missing_response.status_code == 404
+    assert missing_response.json()["error"]["code"] == "FUND_NOT_FOUND"
+
+
+def test_lof_monitor_refresh_and_cache_fallback(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    refresh_response = client.get("/api/lof/opportunities?refresh=true&limit=20")
+    assert refresh_response.status_code == 200
+    refresh_body = refresh_response.json()
+    assert {item["code"] for item in refresh_body["items"]} >= {"161128", "501018", "164906", "160644", "160717"}
+    assert any(item["is_opportunity"] for item in refresh_body["items"])
+
+    cached_response = client.get("/api/lof/opportunities?limit=20", headers={"X-Device-Id": "phone-a"})
+    assert cached_response.status_code == 200
+    assert {item["code"] for item in cached_response.json()["items"]} >= {"161128", "501018"}
+
+
+def test_etf_monitor_refresh_and_cache_fallback(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    refresh_response = client.get("/api/etf/opportunities?refresh=true&limit=20")
+    assert refresh_response.status_code == 200
+    refresh_body = refresh_response.json()
+    assert {item["code"] for item in refresh_body["items"]} >= {"159605", "513500", "159941"}
+    assert any(item["iopv_premium_pct"] is not None for item in refresh_body["items"])
+
+    cached_response = client.get("/api/etf/opportunities?limit=20")
+    assert cached_response.status_code == 200
+    assert {item["code"] for item in cached_response.json()["items"]} >= {"159605", "513500"}
+
+
+def test_lof_notice_settings_api_persists_page_settings(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+
+    update_response = client.put(
+        "/api/lof/notice/settings",
+        json={"enabled": False, "daily_summary_time": "10:30"},
+    )
+    assert update_response.status_code == 200
+    body = update_response.json()
+    assert body["enabled"] is False
+    assert body["daily_summary_time"] == "10:30"
+
+    status_response = client.get("/api/lof/notice/status")
+    assert status_response.status_code == 200
+    status = status_response.json()
+    assert status["enabled"] is False
+    assert status["daily_summary_time"] == "10:30"
+
+    invalid_response = client.put("/api/lof/notice/settings", json={"daily_summary_time": "25:00"})
+    assert invalid_response.status_code == 422
+    assert invalid_response.json()["error"]["code"] == "INVALID_LOF_NOTICE_TIME"

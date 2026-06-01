@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <base target="_top" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>基金持仓估值助手</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-logo.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-logo.png" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260601a" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>基金持仓估值助手</strong>
+        <div class="brand-tools">
+          <span id="sourceBadge">连接数据源...</span>
+          <button id="refreshBtn" class="icon-btn" type="button" title="刷新估值">↻</button>
+        </div>
+      </div>
+      <form id="searchForm" class="search">
+        <input id="searchInput" type="search" placeholder="基金代码 / 名称 / 拼音" autocomplete="off" />
+        <button class="search-btn" type="submit" title="搜索" aria-label="搜索"><span class="search-glyph" aria-hidden="true"></span></button>
+        <button id="addTypedBtn" type="button" title="加入自选">＋</button>
+        <div id="searchResults" class="search-results"></div>
+      </form>
+    </header>
+
+    <main class="layout">
+      <section class="watch-panel">
+        <div class="panel-head">
+          <h1>自选基金</h1>
+          <span id="statusText">等待加载</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>基金</th>
+                <th>官方净值</th>
+                <th>预估净值</th>
+                <th>预估涨跌</th>
+                <th>官方涨跌</th>
+                <th>前十股票涨跌</th>
+                <th>前十股票占净值比</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="watchRows"></tbody>
+          </table>
+        </div>
+        <div id="mobileCards" class="mobile-cards"></div>
+      </section>
+
+      <aside class="detail-panel">
+        <div class="panel-head">
+          <h2 id="detailTitle">估值详情</h2>
+          <span id="detailMeta"></span>
+        </div>
+        <div id="summaryStrip" class="summary-strip"></div>
+        <div class="notice">
+          基于公开持仓和实时行情计算的估算净值，不是基金公司公布的官方净值，仅供研究和参考，不构成投资建议。
+        </div>
+        <div id="externalLinksPanel" class="external-links"></div>
+        <h3>持仓贡献</h3>
+        <div id="holdingsList" class="holdings-list"></div>
+        <h3>说明</h3>
+        <ul id="notesList" class="notes-list"></ul>
+      </aside>
+    </main>
+
+    <script src="/static/app.js?v=20260601a"></script>
+  </body>
+</html>

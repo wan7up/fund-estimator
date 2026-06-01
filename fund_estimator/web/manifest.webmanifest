@@ -1,0 +1,23 @@
+{
+  "name": "基金工具箱",
+  "short_name": "基金工具箱",
+  "description": "场外估值、套利监控和基金对比工具",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#f8fafc",
+  "icons": [
+    {
+      "src": "/static/icons/favicon-32-logo.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/apple-touch-icon-logo.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

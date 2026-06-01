@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <base target="_top" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>基金套利监控</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-logo.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-logo.png" />
+    <link rel="stylesheet" href="/static/lof.css?v=20260601g" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>基金套利监控</strong>
+        <span id="sourceBadge">连接数据源...</span>
+      </div>
+      <form id="lofSearchForm" class="search">
+        <input id="lofSearchInput" type="search" placeholder="LOF代码 / 名称 / 拼音" autocomplete="off" />
+        <button class="icon-btn" type="submit" title="搜索" aria-label="搜索">⌕</button>
+        <button id="lofAddTypedBtn" class="icon-btn" type="button" title="加入自选" aria-label="加入自选">＋</button>
+        <div id="lofSearchResults" class="search-results"></div>
+      </form>
+      <button id="lofRefreshBtn" class="primary-btn" type="button">刷新结果</button>
+    </header>
+
+    <main class="page-shell">
+      <section class="summary-grid" aria-label="监控概览">
+        <div class="summary-card">
+          <span>LOF监控池</span>
+          <strong id="statTotal">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>LOF机会</span>
+          <strong id="statOpportunity">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>LOF强信号</span>
+          <strong id="statStrong">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>LOF可操作</span>
+          <strong id="statActionable">--</strong>
+        </div>
+        <div class="summary-card">
+          <span>LOF自选</span>
+          <strong id="statWatchlist">--</strong>
+        </div>
+      </section>
+
+      <section class="notice-settings-bar" aria-label="飞书通知设置">
+        <div class="notice-settings-main">
+          <label class="notice-switch">
+            <input id="noticeEnabledInput" type="checkbox" />
+            <span class="switch-track" aria-hidden="true"><span></span></span>
+            <strong>飞书通知</strong>
+          </label>
+          <label class="notice-time">
+            <span>每日</span>
+            <input id="noticeTimeInput" type="time" value="10:00" />
+          </label>
+          <button id="noticeConnectBtn" class="secondary-btn" type="button">接入飞书</button>
+          <button id="noticeDisconnectBtn" class="secondary-btn" type="button" hidden>断开飞书</button>
+          <button id="noticeTestBtn" class="secondary-btn" type="button">测试</button>
+        </div>
+        <span id="noticeStatusText" class="notice-status-text">读取通知状态...</span>
+      </section>
+      <section id="noticeConnectPanel" class="notice-connect-panel" hidden>
+        <div>
+          <strong>飞书扫码接入</strong>
+          <span id="noticeConnectHint">请用飞书扫描二维码，按提示配置机器人。</span>
+        </div>
+        <div id="noticeQrBox" class="notice-qr-box"></div>
+      </section>
+
+      <section id="errorBanner" class="error-banner" hidden></section>
+
+      <section class="workspace">
+        <section class="monitor-panel">
+          <div class="panel-head">
+            <div>
+              <h1>LOF 溢价监控</h1>
+              <span id="lofStatusText">等待加载</span>
+            </div>
+            <div class="filter-tabs" aria-label="筛选">
+              <button class="filter-tab active" type="button" data-filter="all">全部</button>
+              <button class="filter-tab" type="button" data-filter="opportunity">机会</button>
+              <button class="filter-tab" type="button" data-filter="actionable">可操作</button>
+              <button class="filter-tab" type="button" data-filter="watchlist">自选</button>
+              <button class="filter-tab pause-toggle active" type="button" id="lofPurchasePausedToggle" aria-pressed="true" title="控制申购状态为暂停的基金是否显示">申购暂停: 显示</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>基金</th>
+                  <th>场内</th>
+                  <th>估算净值</th>
+                  <th title="场内价相对盘中估算净值的溢价；估算净值来自海外指数/期货代理或可用估算源">估算溢价</th>
+                  <th title="场内价相对基金公司已披露最新净值的溢价；不是集思录数据"><button class="sort-header" type="button" data-lof-sort="official_premium_pct">官方净值溢价<span aria-hidden="true">↕</span></button></th>
+                  <th title="参考标的从官方净值日到当前的加权涨跌幅，是盘中估算净值的核心输入">参考标的期间涨幅</th>
+                  <th>成交额</th>
+                  <th>申购/赎回</th>
+                  <th>风险</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="lofRows">
+                <tr><td colspan="10" class="empty">正在加载监控池...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="lofCards" class="mobile-cards"><div class="empty">正在加载监控池...</div></div>
+        </section>
+
+        <aside class="detail-panel">
+          <div class="panel-head">
+            <div>
+              <h2 id="lofDetailTitle">LOF详情</h2>
+              <span id="lofDetailMeta"></span>
+            </div>
+          </div>
+          <div id="lofDetailSummary" class="detail-summary"></div>
+          <h3>参考标的明细</h3>
+          <div id="lofProxyList" class="proxy-list"></div>
+          <h3>风险标记</h3>
+          <ul id="lofRiskList" class="risk-list"></ul>
+        </aside>
+      </section>
+
+      <section class="workspace etf-workspace">
+        <section class="monitor-panel etf-panel">
+          <div class="panel-head">
+            <div>
+              <h1>ETF 溢价 / IOPV 监控</h1>
+              <span id="etfStatusText">等待加载</span>
+            </div>
+            <div class="filter-tabs" aria-label="ETF筛选">
+              <button class="filter-tab active" type="button" data-etf-filter="all">全部</button>
+              <button class="filter-tab" type="button" data-etf-filter="opportunity">机会</button>
+              <button class="filter-tab" type="button" data-etf-filter="actionable">可操作</button>
+              <button class="filter-tab pause-toggle active" type="button" id="etfPurchasePausedToggle" aria-pressed="true" title="控制申购状态为暂停的 ETF 是否显示">申购暂停: 显示</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ETF</th>
+                  <th>场内</th>
+                  <th title="交易所盘中参考净值，用于 ETF 盘中溢价判断">IOPV</th>
+                  <th title="场内价相对 IOPV 的盘中溢价">IOPV溢价</th>
+                  <th title="场内价相对基金公司已披露最新净值的溢价"><button class="sort-header" type="button" data-etf-sort="official_premium_pct">官方净值溢价<span aria-hidden="true">↕</span></button></th>
+                  <th>成交额</th>
+                  <th>申购/赎回</th>
+                  <th title="用于近似观察跨境标的当期走势，不替代 IOPV">辅助标的涨幅</th>
+                  <th>风险</th>
+                </tr>
+              </thead>
+              <tbody id="etfRows">
+                <tr><td colspan="9" class="empty">正在读取 ETF 监控结果...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="etfCards" class="mobile-cards"><div class="empty">正在读取 ETF 监控结果...</div></div>
+        </section>
+
+        <aside class="detail-panel">
+          <div class="panel-head">
+            <div>
+              <h2 id="etfDetailTitle">ETF详情</h2>
+              <span id="etfDetailMeta"></span>
+            </div>
+          </div>
+          <div id="etfDetailSummary" class="detail-summary"></div>
+          <h3>辅助标的</h3>
+          <div id="etfProxyList" class="proxy-list"></div>
+          <h3>风险标记</h3>
+          <ul id="etfRiskList" class="risk-list"></ul>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/static/vendor/qrcode.js?v=20260601g"></script>
+    <script src="/static/lof_app.js?v=20260601g"></script>
+  </body>
+</html>

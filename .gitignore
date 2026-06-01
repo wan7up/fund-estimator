@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.local_python/
+.chrome-*/
+data/
+dist/
+*.sqlite3
+*.db
+*.log
+*.tar
+*.tgz
+.env

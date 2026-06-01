@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <base target="_top" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>基金对比器</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-logo.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-logo.png" />
+    <link rel="stylesheet" href="/static/compare.css?v=20260601e" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>基金对比器</strong>
+        <span id="sourceBadge">连接数据源...</span>
+      </div>
+      <form id="searchForm" class="search">
+        <input id="searchInput" type="search" placeholder="全市场基金代码 / 名称 / 拼音" autocomplete="off" />
+        <button class="icon-btn" type="submit" title="搜索" aria-label="搜索">⌕</button>
+        <button id="addTypedBtn" class="icon-btn" type="button" title="加入对比" aria-label="加入对比">＋</button>
+        <div id="searchResults" class="search-results"></div>
+      </form>
+      <div class="toolbar-actions">
+        <button id="compareBtn" class="primary-btn" type="button">开始对比</button>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="control-panel">
+        <div class="selected-head">
+          <div>
+            <h1>候选基金</h1>
+            <span id="selectionStatus">已选择 0/4</span>
+          </div>
+          <div class="strategy-tabs" aria-label="推荐口径">
+            <button class="strategy-tab active" type="button" data-strategy="balanced">稳健综合</button>
+            <button class="strategy-tab" type="button" data-strategy="aggressive">收益进攻</button>
+            <button class="strategy-tab" type="button" data-strategy="low_cost">低波动稳健</button>
+          </div>
+        </div>
+        <div id="selectedFunds" class="selected-funds"></div>
+        <label class="theme-field">
+          <span>关注板块</span>
+          <input id="themeInput" type="text" maxlength="40" placeholder="例如：科技、半导体、医药" />
+        </label>
+      </section>
+
+      <section id="errorBanner" class="error-banner" hidden></section>
+
+      <section id="resultSummary" class="result-summary" hidden>
+        <div>
+          <span id="conclusionBadge" class="conclusion-badge">--</span>
+          <h2 id="conclusionTitle">等待对比</h2>
+          <p id="recommendationText"></p>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <section class="compare-panel">
+          <div class="panel-head">
+            <div>
+              <h2>评分排序</h2>
+              <span id="rankingMeta">等待结果</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>基金</th>
+                  <th>综合分</th>
+                  <th>阶段收益</th>
+                  <th>费率</th>
+                  <th>限购金额</th>
+                  <th>规模</th>
+                  <th>同类排名</th>
+                  <th>前十占比</th>
+                </tr>
+              </thead>
+              <tbody id="rankingRows">
+                <tr><td colspan="8" class="empty">输入 2-4 只基金后开始对比</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="fundCards" class="mobile-cards"><div class="empty">输入 2-4 只基金后开始对比</div></div>
+        </section>
+
+        <aside class="detail-panel">
+          <div class="panel-head">
+            <div>
+              <h2>分项评分</h2>
+              <span id="scoreMeta">等待结果</span>
+            </div>
+          </div>
+          <div id="scoreDetails" class="score-details"><div class="empty">暂无分项评分</div></div>
+        </aside>
+      </section>
+
+      <section class="compare-panel methodology-panel">
+        <div class="panel-head">
+          <div>
+            <h2>评分依据</h2>
+            <span id="methodologyMeta">稳健综合</span>
+          </div>
+        </div>
+        <div id="methodologyGrid" class="methodology-grid"></div>
+      </section>
+
+      <section class="compare-panel">
+        <div class="panel-head">
+          <div>
+            <h2>相似度判断</h2>
+            <span id="pairMeta">等待结果</span>
+          </div>
+        </div>
+        <div id="pairGrid" class="pair-grid"><div class="empty">暂无相似度结果</div></div>
+      </section>
+
+      <section id="warningPanel" class="warning-panel" hidden>
+        <h2>提示</h2>
+        <ul id="warningList"></ul>
+      </section>
+    </main>
+
+    <script src="/static/compare_app.js?v=20260601e"></script>
+  </body>
+</html>

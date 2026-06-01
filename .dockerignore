@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+*.pyc
+.venv
+.local_python
+.chrome-*
+data/
+*.tar
+*.tgz
+*.log

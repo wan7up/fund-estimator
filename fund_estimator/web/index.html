@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="基金工具箱" />
+    <title>基金工具箱</title>
+    <link rel="manifest" href="/static/manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-logo.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-logo.png" />
+    <link rel="stylesheet" href="/static/shell.css?v=20260601a" />
+  </head>
+  <body>
+    <header class="shell-header">
+      <div class="shell-brand">
+        <img src="/static/icons/favicon-32-logo.png" alt="" width="32" height="32" />
+        <strong>基金工具箱</strong>
+      </div>
+      <nav class="tool-tabs" aria-label="工具切换">
+        <button class="tool-tab active" type="button" data-tool="estimate">场外估值</button>
+        <button class="tool-tab" type="button" data-tool="arbitrage">套利监控</button>
+        <button class="tool-tab" type="button" data-tool="compare">基金对比</button>
+      </nav>
+    </header>
+
+    <main class="tool-shell">
+      <section class="tool-pane active" data-pane="estimate" aria-label="场外估值">
+        <iframe title="场外基金实时估值预测器" data-src="/tool/estimate"></iframe>
+      </section>
+      <section class="tool-pane" data-pane="arbitrage" aria-label="套利监控">
+        <iframe title="基金套利监控" data-src="/tool/arbitrage"></iframe>
+      </section>
+      <section class="tool-pane" data-pane="compare" aria-label="基金对比">
+        <iframe title="基金对比器" data-src="/tool/compare"></iframe>
+      </section>
+    </main>
+
+    <script src="/static/shell.js?v=20260601a"></script>
+  </body>
+</html>

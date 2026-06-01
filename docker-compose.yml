@@ -1,0 +1,14 @@
+services:
+  fund-tools:
+    build: .
+    container_name: fund-tools
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      FUND_ESTIMATOR_FORCE_MOCK: "0"
+      FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK: "0"
+      FUND_ESTIMATOR_DB: /app/data/fund_estimator.sqlite3
+      FUND_ESTIMATOR_BACKGROUND_SCAN: "0"
+    volumes:
+      - ./data:/app/data
