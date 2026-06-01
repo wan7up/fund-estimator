@@ -118,19 +118,43 @@ def matches(path: str, patterns: tuple[str, ...]) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in SCOPES:
+    if len(sys.argv) not in {2, 3} or sys.argv[1] not in SCOPES or (len(sys.argv) == 3 and sys.argv[2] != "--preflight"):
         names = ", ".join(sorted(SCOPES))
-        print(f"用法: python scripts/check_session_scope.py <scope>")
+        print("用法: python scripts/check_session_scope.py <scope> [--preflight]")
         print(f"scope 可选: {names}")
+        print("--preflight 用于动工前：打印职责范围，并要求工作区没有未提交改动。")
         return 2
 
     scope = sys.argv[1]
+    preflight = len(sys.argv) == 3
+    allowed = SCOPES[scope]
+
+    if preflight:
+        print(f"动工前范围确认：{scope}")
+        print("本 session 只允许修改：")
+        for pattern in allowed:
+            print(f"- {pattern}")
+        if scope != "orchestrator":
+            print("")
+            print("以下统筹文件禁止修改：")
+            for pattern in PROTECTED_BY_ORCHESTRATOR:
+                print(f"- {pattern}")
+
     files = changed_files()
     if not files:
-        print("当前没有未提交改动。")
+        print("")
+        print("工作区干净，可以开始。")
         return 0
 
-    allowed = SCOPES[scope]
+    if preflight:
+        print("")
+        print("工作区已有未提交改动，先不要开工，避免混入其它 session 的改动：")
+        for path in files:
+            print(f"- {path}")
+        print("")
+        print("处理方式：先让相关 session 提交/撤回这些改动，或确认你是在继续同一个未完成 session。")
+        return 1
+
     forbidden = [path for path in files if not matches(path, allowed)]
 
     if scope != "orchestrator":
