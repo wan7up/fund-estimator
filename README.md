@@ -11,7 +11,7 @@
 ## 功能
 
 - 单页工具台：`/` 默认展示场外估值，`/estimate`、`/arbitrage`、`/compare` 可直达对应标签。
-- 多 session 协作边界见 `协作说明.md`。
+- 多 session 协作边界见 `协作说明.md`；收尾前运行 `scripts/check_session_scope.py` 防止越界修改。
 - 基金代码/名称搜索。
 - 单用户本地自选基金列表。
 - 单基金和批量实时估值。

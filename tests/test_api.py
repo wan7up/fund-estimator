@@ -27,20 +27,31 @@ def test_health(tmp_path, monkeypatch):
     assert source_response.json()["mode"] == "mock"
 
 
-def test_default_page_can_switch_to_compare(tmp_path, monkeypatch):
-    monkeypatch.setenv("FUND_ESTIMATOR_DEFAULT_PAGE", "compare")
+def test_shell_and_tool_page_routes(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
     root_response = client.get("/")
+    estimate_response = client.get("/estimate")
+    arbitrage_response = client.get("/arbitrage")
     monitor_response = client.get("/monitor")
     compare_response = client.get("/compare")
+    estimate_tool_response = client.get("/tool/estimate")
+    arbitrage_tool_response = client.get("/tool/arbitrage")
+    compare_tool_response = client.get("/tool/compare")
 
-    assert root_response.status_code == 200
-    assert "基金对比器" in root_response.text
-    assert monitor_response.status_code == 200
-    assert "套利监控" in monitor_response.text
-    assert compare_response.status_code == 200
-    assert "基金对比器" in compare_response.text
+    for response in [root_response, estimate_response, arbitrage_response, monitor_response, compare_response]:
+        assert response.status_code == 200
+        assert "基金工具箱" in response.text
+        assert 'data-src="/tool/estimate"' in response.text
+        assert 'data-src="/tool/arbitrage"' in response.text
+        assert 'data-src="/tool/compare"' in response.text
+
+    assert estimate_tool_response.status_code == 200
+    assert "/static/app.js" in estimate_tool_response.text
+    assert arbitrage_tool_response.status_code == 200
+    assert "/static/lof_app.js" in arbitrage_tool_response.text
+    assert compare_tool_response.status_code == 200
+    assert "/static/compare_app.js" in compare_tool_response.text
 
 
 def test_estimate_and_watchlist(tmp_path, monkeypatch):

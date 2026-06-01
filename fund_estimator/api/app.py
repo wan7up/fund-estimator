@@ -90,7 +90,6 @@ def get_runtime_config() -> dict[str, object]:
         "force_mock": force_mock,
         "provider": "mock" if force_mock else "eastmoney+sina",
         "mode": "mock" if force_mock else "real",
-        "default_page": os.getenv("FUND_ESTIMATOR_DEFAULT_PAGE", "monitor").strip().lower(),
         "background_scan_enabled": os.getenv("FUND_ESTIMATOR_BACKGROUND_SCAN", "0") == "1",
         "background_scan_interval_seconds": int(os.getenv("FUND_ESTIMATOR_SCAN_INTERVAL_SECONDS", "60")),
     }
@@ -167,9 +166,9 @@ def create_etf_monitor_service(estimator: FundEstimatorService) -> EtfMonitorSer
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="场外基金实时估值预测器",
+        title="基金工具箱",
         version=__version__,
-        description="基于公开持仓和实时行情计算盘中估算净值，不是官方净值。",
+        description="提供场外基金估值、套利监控和基金对比研究辅助。",
     )
     estimator = create_estimator_service()
     watchlist = WatchlistService(estimator.cache)
