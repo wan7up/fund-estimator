@@ -150,6 +150,13 @@ def test_hot_hong_kong_us_internet_lof_is_in_core_pool():
     assert {leg.symbol for leg in item.proxies} >= {"KWEB", "NQ=F", "^HSI"}
 
 
+def test_overseas_technology_lof_is_in_core_pool():
+    item = CORE_LOF_BY_CODE["501312"]
+
+    assert item.theme == "Overseas technology"
+    assert {leg.symbol for leg in item.proxies} == {"NQ=F"}
+
+
 def test_lof_scan_discovers_non_core_premium_from_full_market_quotes(tmp_path):
     service = make_service(tmp_path)
 

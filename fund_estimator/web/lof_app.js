@@ -30,13 +30,6 @@ const state = {
   lofSort: { key: null, direction: "desc" },
   scanInFlight: false,
   lastResponse: null,
-  etfItems: [],
-  selectedEtfCode: null,
-  etfFilter: "all",
-  etfShowPurchasePaused: true,
-  etfSort: { key: null, direction: "desc" },
-  etfScanInFlight: false,
-  etfLastResponse: null,
   noticeStatus: null,
   noticeInFlight: false,
   noticePollTimer: null,
@@ -71,17 +64,6 @@ const els = {
   detailSummary: document.querySelector("#lofDetailSummary"),
   proxyList: document.querySelector("#lofProxyList"),
   riskList: document.querySelector("#lofRiskList"),
-  etfStatusText: document.querySelector("#etfStatusText"),
-  etfFilterTabs: document.querySelectorAll("[data-etf-filter]"),
-  etfPurchasePausedToggle: document.querySelector("#etfPurchasePausedToggle"),
-  etfSortButtons: document.querySelectorAll("[data-etf-sort]"),
-  etfRows: document.querySelector("#etfRows"),
-  etfCards: document.querySelector("#etfCards"),
-  etfDetailTitle: document.querySelector("#etfDetailTitle"),
-  etfDetailMeta: document.querySelector("#etfDetailMeta"),
-  etfDetailSummary: document.querySelector("#etfDetailSummary"),
-  etfProxyList: document.querySelector("#etfProxyList"),
-  etfRiskList: document.querySelector("#etfRiskList"),
   noticeEnabledInput: document.querySelector("#noticeEnabledInput"),
   noticeTimeInput: document.querySelector("#noticeTimeInput"),
   noticeConnectBtn: document.querySelector("#noticeConnectBtn"),
@@ -444,13 +426,6 @@ async function fetchScan(force) {
   return api(`/api/lof/opportunities?${params.toString()}`);
 }
 
-async function fetchEtfScan(force) {
-  const params = new URLSearchParams({
-    limit: "500",
-    refresh: force ? "true" : "false",
-  });
-  return api(`/api/etf/opportunities?${params.toString()}`);
-}
 
 function needsInitialScan(response) {
   const items = response?.items || [];
@@ -484,29 +459,6 @@ async function refreshLof(force = false) {
   }
 }
 
-async function refreshEtf(force = false) {
-  if (state.etfScanInFlight) return;
-  state.etfScanInFlight = true;
-  els.etfStatusText.textContent = force ? "扫描中" : "读取缓存";
-  try {
-    let response = await fetchEtfScan(force);
-    if (!force && needsInitialScan(response)) {
-      els.etfStatusText.textContent = "首次扫描中，可能需要几十秒";
-      response = await fetchEtfScan(true);
-    }
-    state.etfLastResponse = response;
-    state.etfItems = response.items || [];
-    if (!state.etfItems.some((item) => item.code === state.selectedEtfCode)) {
-      state.selectedEtfCode = state.etfItems[0]?.code || null;
-    }
-    renderEtfAll();
-  } catch (error) {
-    showErrors([error.message]);
-    els.etfStatusText.textContent = "读取失败";
-  } finally {
-    state.etfScanInFlight = false;
-  }
-}
 
 function sortValue(item, key) {
   if (!key) return null;
@@ -543,7 +495,7 @@ function toggleSort(sortState, key) {
 
 function renderSortButtons(buttons, sortState) {
   for (const button of buttons) {
-    const key = button.dataset.lofSort || button.dataset.etfSort;
+    const key = button.dataset.lofSort;
     const active = key === sortState.key;
     button.classList.toggle("active", active);
     const indicator = button.querySelector("span");
@@ -580,13 +532,6 @@ function filteredItems() {
   return sortItems(items, state.lofSort);
 }
 
-function filteredEtfItems() {
-  let items = state.etfItems;
-  if (state.etfFilter === "opportunity") items = items.filter((item) => item.is_opportunity);
-  if (state.etfFilter === "actionable") items = items.filter((item) => item.actionable);
-  items = applyPurchasePausedFilter(items, state.etfShowPurchasePaused);
-  return sortItems(items, state.etfSort);
-}
 
 function showErrors(errors) {
   const visibleErrors = (errors || []).filter(Boolean);
@@ -621,16 +566,6 @@ function renderStatus() {
   els.statusText.textContent = `已更新 ${scannedAt} · 显示 ${visibleCount}/${state.items.length}`;
 }
 
-function renderEtfStatus() {
-  const response = state.etfLastResponse;
-  if (!response) {
-    els.etfStatusText.textContent = "等待加载";
-    return;
-  }
-  const scannedAt = response.scanned_at ? new Date(response.scanned_at).toLocaleTimeString() : "--";
-  const visibleCount = filteredEtfItems().length;
-  els.etfStatusText.textContent = `已更新 ${scannedAt} · 显示 ${visibleCount}/${state.etfItems.length}`;
-}
 
 function riskTags(item, limit = 4) {
   const risks = item.risks && item.risks.length ? item.risks : ["暂无风险"];
@@ -772,17 +707,6 @@ function lofSummaryHtml(item) {
     ${metric("日限额", fmtMoney(item.daily_purchase_limit_yuan), item.fee_rate_pct === null || item.fee_rate_pct === undefined ? "费率 --" : `费率 ${fmt(item.fee_rate_pct, 2)}%`)}`;
 }
 
-function etfSummaryHtml(item) {
-  const premium = etfPremiumValue(item);
-  return `
-    ${metric("IOPV溢价", fmtPct(item.iopv_premium_pct), fmt(item.iopv, 4), clsForPct(item.iopv_premium_pct || 0), "场内价相对交易所盘中 IOPV 的溢价")}
-    ${metric("辅助标的涨幅", referenceText(item), referencePeriodText(item), clsForPct(referenceChange(item) || 0), "ETF 有 IOPV 时以 IOPV 溢价为主，参考标的涨幅只辅助观察跨境方向")}
-    ${metric("官方净值溢价", fmtPct(item.official_premium_pct), `${fmt(item.official_nav, 4)} / ${item.official_nav_date || "--"}`, clsForPct(item.official_premium_pct || 0), OFFICIAL_PREMIUM_HINT)}
-    ${metric("场内价格", fmt(item.exchange_price, 3), fmtPct(item.exchange_change_pct), clsForPct(item.exchange_change_pct || 0))}
-    ${metric("成交额", fmtMoney(item.exchange_turnover_yuan), `申购 ${statusText(item.purchase_status)} / 赎回 ${statusText(item.redemption_status)}`)}
-    ${metric("信号", directionText(item.direction), `${signalText(item)} · ${fmtPct(premium)}`)}
-    ${metric("日限额", fmtMoney(item.daily_purchase_limit_yuan), item.fee_rate_pct === null || item.fee_rate_pct === undefined ? "费率 --" : `费率 ${fmt(item.fee_rate_pct, 2)}%`)}`;
-}
 
 function renderDetail() {
   const item = state.items.find((entry) => entry.code === state.selectedCode);
@@ -801,104 +725,6 @@ function renderDetail() {
   els.riskList.innerHTML = riskListHtml(item);
 }
 
-function renderEtfRows() {
-  const items = filteredEtfItems();
-  if (!state.etfItems.length) {
-    els.etfRows.innerHTML = `<tr><td colspan="9" class="empty">后台 ETF 扫描尚未完成，请稍后刷新</td></tr>`;
-    els.etfCards.innerHTML = `<div class="empty">后台 ETF 扫描尚未完成，请稍后刷新</div>`;
-    return;
-  }
-  if (!items.length) {
-    els.etfRows.innerHTML = `<tr><td colspan="9" class="empty">当前筛选没有结果</td></tr>`;
-    els.etfCards.innerHTML = `<div class="empty">当前筛选没有结果</div>`;
-    return;
-  }
-  els.etfRows.innerHTML = items.map(etfRowHtml).join("");
-  els.etfCards.innerHTML = items.map(etfCardHtml).join("");
-}
-
-function etfPremiumValue(item) {
-  return item.iopv_premium_pct ?? item.official_premium_pct;
-}
-
-function etfRowHtml(item) {
-  const selected = state.selectedEtfCode === item.code ? "selected" : "";
-  return `
-    <tr data-etf-code="${item.code}" class="${selected} level-${item.level}">
-      <td>
-        <div class="fund-name">
-          <strong>${escapeHtml(item.name)}</strong>
-          <small>${item.code} · ${escapeHtml(item.theme || "跨境ETF")} ${signalBadge(item)}</small>
-        </div>
-      </td>
-      <td>${fmt(item.exchange_price, 3)}<br><small class="${clsForPct(item.exchange_change_pct || 0)}">${fmtPct(item.exchange_change_pct)}</small></td>
-      <td>${fmt(item.iopv, 4)}</td>
-      <td class="${clsForPct(item.iopv_premium_pct || 0)}"><strong>${fmtPct(item.iopv_premium_pct)}</strong></td>
-      <td class="${clsForPct(item.official_premium_pct || 0)}">${fmtPct(item.official_premium_pct)}<br><small>${item.official_nav_date || "--"}</small></td>
-      <td>${fmtMoney(item.exchange_turnover_yuan)}</td>
-      <td>${statusCell(item)}</td>
-      <td class="${clsForPct(referenceChange(item) || 0)}">${referenceText(item)}<br><small>${referencePeriodText(item)}</small></td>
-      <td>${riskTags(item)}</td>
-    </tr>`;
-}
-
-function etfCardHtml(item) {
-  const selected = state.selectedEtfCode === item.code;
-  return `
-    <article class="lof-card level-${item.level} ${selected ? "selected" : ""}" data-etf-code="${item.code}">
-      <div class="card-head">
-        <div>
-          <strong>${escapeHtml(item.name)}</strong>
-          <small>${item.code} · ${escapeHtml(item.theme || "跨境ETF")}</small>
-        </div>
-        ${signalBadge(item)}
-      </div>
-      <div class="card-metrics">
-        <div><span>IOPV溢价</span><strong class="${clsForPct(item.iopv_premium_pct || 0)}">${fmtPct(item.iopv_premium_pct)}</strong></div>
-        <div><span>IOPV</span><strong>${fmt(item.iopv, 4)}</strong></div>
-        <div><span>场内价</span><strong>${fmt(item.exchange_price, 3)}</strong></div>
-        <div><span>辅助标的涨幅</span><strong class="${clsForPct(referenceChange(item) || 0)}">${referenceText(item)}</strong></div>
-      </div>
-      ${riskTags(item, 3)}
-      ${selected ? mobileInlineDetailHtml(etfSummaryHtml(item), "辅助标的", proxyMovesHtml(item, "暂无参考标的行情"), riskListHtml(item)) : ""}
-    </article>`;
-}
-
-function renderEtfDetail() {
-  const item = state.etfItems.find((entry) => entry.code === state.selectedEtfCode);
-  if (!item) {
-    els.etfDetailTitle.textContent = "ETF详情";
-    els.etfDetailMeta.textContent = "";
-    els.etfDetailSummary.innerHTML = `<div class="empty">选择一只ETF查看详情</div>`;
-    els.etfProxyList.innerHTML = "";
-    els.etfRiskList.innerHTML = "";
-    return;
-  }
-  els.etfDetailTitle.textContent = item.name;
-  els.etfDetailMeta.textContent = `${item.code} · ${directionText(item.direction)} · ${signalText(item)}`;
-  els.etfDetailSummary.innerHTML = etfSummaryHtml(item);
-  els.etfProxyList.innerHTML = proxyMovesHtml(item, "暂无参考标的行情");
-  els.etfRiskList.innerHTML = riskListHtml(item);
-}
-
-function renderEtfFilters() {
-  for (const tab of els.etfFilterTabs) {
-    tab.classList.toggle("active", tab.dataset.etfFilter === state.etfFilter);
-  }
-  renderPurchasePausedToggle(
-    els.etfPurchasePausedToggle,
-    state.etfShowPurchasePaused,
-    state.etfItems.filter(isPurchasePaused).length
-  );
-}
-
-function renderEtfAll() {
-  renderEtfFilters();
-  renderSortButtons(els.etfSortButtons, state.etfSort);
-  renderEtfRows();
-  renderEtfDetail();
-  renderEtfStatus();
-}
 
 function renderFilters() {
   for (const tab of els.filterTabs) {
@@ -981,13 +807,6 @@ function handleItemClick(event) {
   renderDetail();
 }
 
-function handleEtfItemClick(event) {
-  const row = event.target.closest("[data-etf-code]");
-  if (!row) return;
-  state.selectedEtfCode = row.dataset.etfCode;
-  renderEtfRows();
-  renderEtfDetail();
-}
 
 let searchTimer = null;
 
@@ -1015,7 +834,6 @@ els.searchResults.addEventListener("click", (event) => {
 
 els.refreshBtn.addEventListener("click", () => {
   refreshLof(false);
-  refreshEtf(false);
 });
 
 els.noticeEnabledInput.addEventListener("change", () => {
@@ -1043,11 +861,6 @@ els.purchasePausedToggle?.addEventListener("click", () => {
   renderAll();
 });
 
-els.etfPurchasePausedToggle?.addEventListener("click", () => {
-  state.etfShowPurchasePaused = !state.etfShowPurchasePaused;
-  renderEtfAll();
-});
-
 for (const tab of els.filterTabs) {
   tab.addEventListener("click", () => {
     state.filter = tab.dataset.filter || "all";
@@ -1062,24 +875,8 @@ for (const button of els.sortButtons) {
   });
 }
 
-for (const tab of els.etfFilterTabs) {
-  tab.addEventListener("click", () => {
-    state.etfFilter = tab.dataset.etfFilter || "all";
-    renderEtfAll();
-  });
-}
-
-for (const button of els.etfSortButtons) {
-  button.addEventListener("click", () => {
-    toggleSort(state.etfSort, button.dataset.etfSort);
-    renderEtfAll();
-  });
-}
-
 els.rows.addEventListener("click", handleItemClick);
 els.cards.addEventListener("click", handleItemClick);
-els.etfRows.addEventListener("click", handleEtfItemClick);
-els.etfCards.addEventListener("click", handleEtfItemClick);
 
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".search")) {
@@ -1089,10 +886,9 @@ document.addEventListener("click", (event) => {
 
 async function bootstrap() {
   await Promise.all([loadSourceStatus(), loadWatchlist(), loadNoticeStatus()]);
-  await Promise.all([refreshLof(false), refreshEtf(false)]);
+  await refreshLof(false);
   setInterval(() => {
     refreshLof(false);
-    refreshEtf(false);
     loadNoticeStatus();
   }, 30000);
 }

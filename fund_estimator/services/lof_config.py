@@ -41,6 +41,7 @@ CORE_CROSS_BORDER_LOFS: tuple[CoreLof, ...] = (
     CoreLof("501025", "Hong Kong", (ProxyLeg("^HSI", 1.0, "Hang Seng Index"),)),
     CoreLof("501300", "Hong Kong", (ProxyLeg("^HSI", 1.0, "Hang Seng Index"),)),
     CoreLof("501310", "Overseas China", (ProxyLeg("^HSI", 0.5, "Hang Seng Index"), ProxyLeg("KWEB", 0.5, "China internet ETF"))),
+    CoreLof("501312", "Overseas technology", (ProxyLeg("NQ=F", 1.0, "Nasdaq 100 futures"),)),
 )
 
 CORE_LOF_BY_CODE = {item.code: item for item in CORE_CROSS_BORDER_LOFS}

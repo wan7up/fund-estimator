@@ -7,7 +7,7 @@
     <title>基金套利监控</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-logo.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-logo.png" />
-    <link rel="stylesheet" href="/static/lof.css?v=20260603a" />
+    <link rel="stylesheet" href="/static/lof.css?v=20260603b" />
   </head>
   <body>
     <header class="topbar">
@@ -130,61 +130,9 @@
         </aside>
       </section>
 
-      <section class="workspace etf-workspace">
-        <section class="monitor-panel etf-panel">
-          <div class="panel-head">
-            <div>
-              <h1>ETF 溢价 / IOPV 监控</h1>
-              <span id="etfStatusText">等待加载</span>
-            </div>
-            <div class="filter-tabs" aria-label="ETF筛选">
-              <button class="filter-tab active" type="button" data-etf-filter="all">全部</button>
-              <button class="filter-tab" type="button" data-etf-filter="opportunity">机会</button>
-              <button class="filter-tab" type="button" data-etf-filter="actionable">可操作</button>
-              <button class="filter-tab pause-toggle active" type="button" id="etfPurchasePausedToggle" aria-pressed="true" title="控制申购状态为暂停的 ETF 是否显示">申购暂停: 显示</button>
-            </div>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ETF</th>
-                  <th>场内</th>
-                  <th title="交易所盘中参考净值，用于 ETF 盘中溢价判断">IOPV</th>
-                  <th title="场内价相对 IOPV 的盘中溢价">IOPV溢价</th>
-                  <th title="场内价相对基金公司已披露最新净值的溢价"><button class="sort-header" type="button" data-etf-sort="official_premium_pct">官方净值溢价<span aria-hidden="true">↕</span></button></th>
-                  <th>成交额</th>
-                  <th>申购/赎回</th>
-                  <th title="用于近似观察跨境标的当期走势，不替代 IOPV">辅助标的涨幅</th>
-                  <th>风险</th>
-                </tr>
-              </thead>
-              <tbody id="etfRows">
-                <tr><td colspan="9" class="empty">正在读取 ETF 监控结果...</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div id="etfCards" class="mobile-cards"><div class="empty">正在读取 ETF 监控结果...</div></div>
-        </section>
-
-        <aside class="detail-panel">
-          <div class="panel-head">
-            <div>
-              <h2 id="etfDetailTitle">ETF详情</h2>
-              <span id="etfDetailMeta"></span>
-            </div>
-          </div>
-          <div id="etfDetailSummary" class="detail-summary"></div>
-          <h3>辅助标的</h3>
-          <div id="etfProxyList" class="proxy-list"></div>
-          <h3>风险标记</h3>
-          <ul id="etfRiskList" class="risk-list"></ul>
-        </aside>
-      </section>
     </main>
 
-    <script src="/static/vendor/qrcode.js?v=20260603a"></script>
-    <script src="/static/lof_app.js?v=20260603a"></script>
+    <script src="/static/vendor/qrcode.js?v=20260603b"></script>
+    <script src="/static/lof_app.js?v=20260603b"></script>
   </body>
 </html>
