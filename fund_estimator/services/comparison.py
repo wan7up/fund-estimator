@@ -194,16 +194,18 @@ class FundComparisonService:
             r"(?:暂停|限制)?大额(?:申购|购买)(?:限额|上限)?|"
             r"申购限额|购买限额|申购上限|购买上限|限购)"
         )
-        min_purchase_terms = r"(?:最低|起购|起点|申购起点|购买起点|首次申购|追加申购|最小)"
+        min_purchase_terms = r"(?:最低|起购|起点|申购起点|购买起点|定投起点|首次申购|追加申购|首次购买|追加购买|最小)"
+        separator = r"(?:[:：=为是]|不超过|不高于|最高|上限为|限制为|人民币)?"
         patterns = (
-            rf"(?P<key>{limit_keys})(?P<gap>[^0-9]{{0,24}})(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)",
-            rf"(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)(?P<gap>[^，。；;]{{0,24}})(?P<key>{limit_keys})",
+            ("key_before", rf"(?P<key>{limit_keys})(?P<sep>{separator})(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)"),
+            ("value_before", rf"(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)(?P<sep>{separator})(?P<key>{limit_keys})"),
         )
-        for pattern in patterns:
+        for direction, pattern in patterns:
             match = re.search(pattern, compact)
             if not match:
                 continue
-            if re.search(min_purchase_terms, match.group("gap")):
+            prefix_context = compact[max(0, match.start() - 16) : match.start()]
+            if direction == "value_before" and re.search(min_purchase_terms, prefix_context):
                 continue
             value = float(match.group("value"))
             unit = match.group("unit")

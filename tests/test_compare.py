@@ -196,6 +196,12 @@ def test_purchase_limit_parser_ignores_minimum_purchase_text():
     assert FundComparisonService._extract_purchase_limit_yuan(text) is None
 
 
+def test_purchase_limit_parser_ignores_unlimited_text_before_minimum_purchase():
+    text = "<html><body>申购起点 10.00 元 定投起点 10.00 元 日累计申购限额 无限额 首次购买 10.00 元</body></html>"
+
+    assert FundComparisonService._extract_purchase_limit_yuan(text) is None
+
+
 def test_purchase_limit_parser_keeps_limit_when_minimum_purchase_also_present():
     text = "<html><body>申购金额限制：购买起点 10 元。单日累计购买上限 1000 元。</body></html>"
 
