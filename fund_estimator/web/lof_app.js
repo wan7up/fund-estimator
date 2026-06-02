@@ -452,6 +452,12 @@ async function fetchEtfScan(force) {
   return api(`/api/etf/opportunities?${params.toString()}`);
 }
 
+function needsInitialScan(response) {
+  const items = response?.items || [];
+  const errors = response?.errors || [];
+  return items.length === 0 && errors.some((error) => String(error).includes("后台扫描尚未完成"));
+}
+
 async function refreshLof(force = false) {
   if (state.scanInFlight) return;
   state.scanInFlight = true;
@@ -459,6 +465,10 @@ async function refreshLof(force = false) {
   els.statusText.textContent = force ? "扫描中" : "读取缓存";
   try {
     let response = await fetchScan(force);
+    if (!force && needsInitialScan(response)) {
+      els.statusText.textContent = "首次扫描中，可能需要几十秒";
+      response = await fetchScan(true);
+    }
     state.lastResponse = response;
     state.items = response.items || [];
     if (!state.items.some((item) => item.code === state.selectedCode)) {
@@ -479,7 +489,11 @@ async function refreshEtf(force = false) {
   state.etfScanInFlight = true;
   els.etfStatusText.textContent = force ? "扫描中" : "读取缓存";
   try {
-    const response = await fetchEtfScan(force);
+    let response = await fetchEtfScan(force);
+    if (!force && needsInitialScan(response)) {
+      els.etfStatusText.textContent = "首次扫描中，可能需要几十秒";
+      response = await fetchEtfScan(true);
+    }
     state.etfLastResponse = response;
     state.etfItems = response.items || [];
     if (!state.etfItems.some((item) => item.code === state.selectedEtfCode)) {
