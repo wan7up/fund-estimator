@@ -149,7 +149,7 @@ class FundComparisonService:
 
     async def _load_candidate(self, code: str) -> CompareCandidate:
         profile = await self.estimator.get_profile(code)
-        candidate = CompareCandidate(profile=profile, purchase_limit_yuan=profile.details.trading.purchase_limit_yuan)
+        candidate = CompareCandidate(profile=profile)
         try:
             candidate.holdings = await self.estimator.get_holdings(code)
         except AppError as exc:
@@ -158,15 +158,16 @@ class FundComparisonService:
             candidate.estimate = await self.estimator.estimate(code, mode="both")
         except AppError:
             candidate.estimate = None
+        candidate.purchase_limit_yuan = await self._load_purchase_limit_yuan(code, profile)
         if candidate.purchase_limit_yuan is None:
-            candidate.purchase_limit_yuan = await self._load_purchase_limit_yuan(code, profile)
+            candidate.purchase_limit_yuan = self._profile_purchase_limit_yuan(profile)
         if profile.stale:
             candidate.warnings.append("基金画像使用了过期缓存数据")
         return candidate
 
     async def _load_purchase_limit_yuan(self, code: str, profile: FundProfile) -> float | None:
         if profile.source != "eastmoney":
-            return profile.details.trading.purchase_limit_yuan
+            return None
         url = f"https://fundf10.eastmoney.com/jjfl_{code}.html"
         try:
             async with httpx.AsyncClient(timeout=4.0, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
@@ -184,19 +185,40 @@ class FundComparisonService:
         except (ValueError, TypeError):
             visible_text = text
         compact = re.sub(r"\s+", "", visible_text)
-        limit_keys = r"(?:日累计(?:申购限额|购买上限)|单日累计(?:申购限额|购买上限)|单日(?:申购限额|购买上限)|每日(?:申购限额|购买上限)|申购上限|购买上限|限购|限额)"
+        limit_keys = (
+            r"(?:日累计(?:申购限额|购买限额|购买上限)|"
+            r"单日累计(?:申购限额|购买限额|购买上限)|"
+            r"单日单账户累计(?:申购|购买)?(?:限额|上限)|"
+            r"单日(?:申购限额|购买限额|购买上限)|"
+            r"每日(?:申购限额|购买限额|购买上限)|"
+            r"(?:暂停|限制)?大额(?:申购|购买)(?:限额|上限)?|"
+            r"申购限额|购买限额|申购上限|购买上限|限购)"
+        )
+        min_purchase_terms = r"(?:最低|起购|起点|申购起点|购买起点|首次申购|追加申购|最小)"
         patterns = (
-            rf"{limit_keys}[^0-9]{{0,24}}(\d+(?:\.\d+)?)(万|元)",
-            rf"(\d+(?:\.\d+)?)(万|元)[^，。；;]{{0,24}}{limit_keys}",
+            rf"(?P<key>{limit_keys})(?P<gap>[^0-9]{{0,24}})(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)",
+            rf"(?P<value>\d+(?:\.\d+)?)(?P<unit>万|元)(?P<gap>[^，。；;]{{0,24}})(?P<key>{limit_keys})",
         )
         for pattern in patterns:
             match = re.search(pattern, compact)
             if not match:
                 continue
-            value = float(match.group(1))
-            unit = match.group(2)
+            if re.search(min_purchase_terms, match.group("gap")):
+                continue
+            value = float(match.group("value"))
+            unit = match.group("unit")
             return value * 10_000 if unit == "万" else value
         return None
+
+    @staticmethod
+    def _profile_purchase_limit_yuan(profile: FundProfile) -> float | None:
+        limit = profile.details.trading.purchase_limit_yuan
+        if limit is None or limit <= 0:
+            return None
+        min_purchase = profile.details.trading.min_purchase_amount
+        if min_purchase is not None and abs(float(limit) - float(min_purchase)) < 0.01:
+            return None
+        return limit
 
     def _build_pair_similarities(
         self,

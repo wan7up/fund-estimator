@@ -190,6 +190,36 @@ def test_purchase_limit_parser_handles_daily_limit_text():
     assert FundComparisonService._extract_purchase_limit_yuan(text) == 1000
 
 
+def test_purchase_limit_parser_ignores_minimum_purchase_text():
+    text = "<html><body>申购金额限制：购买起点 10 元，首次申购最低 10 元，追加申购最低 10 元</body></html>"
+
+    assert FundComparisonService._extract_purchase_limit_yuan(text) is None
+
+
+def test_purchase_limit_parser_keeps_limit_when_minimum_purchase_also_present():
+    text = "<html><body>申购金额限制：购买起点 10 元。单日累计购买上限 1000 元。</body></html>"
+
+    assert FundComparisonService._extract_purchase_limit_yuan(text) == 1000
+
+
+def test_profile_purchase_limit_ignores_minimum_purchase_amount():
+    item = profile(
+        "300001",
+        "测试起购金额基金A",
+        "指数型",
+        one_year=20,
+        stock=90,
+        bond=0,
+        cash=5,
+        fee=0.1,
+        scale=8,
+        percentile=80,
+    )
+    item.details.trading.purchase_limit_yuan = 10
+
+    assert FundComparisonService._profile_purchase_limit_yuan(item) is None
+
+
 def test_same_theme_different_funds_are_scored(tmp_path):
     result = compare(tmp_path, ["100001", "100003"], theme_hint="半导体")
 
