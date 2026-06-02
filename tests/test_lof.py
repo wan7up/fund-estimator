@@ -62,7 +62,7 @@ class DummyMarketSource:
         }
 
     async def get_all_quotes(self):
-        return await self.get_quotes(["160999"])
+        return await self.get_quotes(["160999", "160998"])
 
 
 class FailingMarketSource:
@@ -169,6 +169,18 @@ def test_lof_scan_discovers_non_core_premium_from_full_market_quotes(tmp_path):
     assert item.is_opportunity is True
     assert item.level == "normal"
     assert item.actionable is False
+
+
+def test_lof_scan_includes_non_core_lof_below_opportunity_threshold(tmp_path):
+    service = make_service(tmp_path)
+
+    response = __import__("asyncio").run(service.get_opportunities(limit=200))
+    item = next(row for row in response.items if row.code == "160998")
+
+    assert item.official_premium_pct == 1.0
+    assert item.is_opportunity is False
+    assert item.actionable is False
+    assert item.exchange_turnover_yuan == 100_000
 
 
 def test_sina_lof_quote_parses_hot_hong_kong_us_internet_quote():

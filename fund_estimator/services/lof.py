@@ -43,7 +43,7 @@ DEFAULT_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_NORMAL_THRESHOLD_PCT = 2.0
 DEFAULT_STRONG_THRESHOLD_PCT = 5.0
 DISCOVERY_PROFILE_CONCURRENCY = 24
-DISCOVERY_MAX_CODES = 160
+DISCOVERY_MAX_CODES = 500
 TRADING_PAUSED = "\u6682\u505c"
 
 
@@ -499,9 +499,9 @@ class LofMonitorService:
         limit: int = 80,
         refresh: bool = True,
     ) -> LofOpportunityResponse:
-        cache_key = f"v3:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+        cache_key = f"v4:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
         if not refresh:
-            fallback_key = f"v3:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+            fallback_key = f"v4:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
             cache_keys = [cache_key]
             if fallback_key != cache_key:
                 cache_keys.append(fallback_key)
@@ -530,11 +530,9 @@ class LofMonitorService:
         errors: list[str] = []
         base_codes = list(dict.fromkeys([item.code for item in CORE_CROSS_BORDER_LOFS] + [item.code for item in watchlist]))
         discovery_quote_map = await self._get_discovery_quotes(errors)
-        discovered_codes = await self._discover_opportunity_codes(
+        discovered_codes = await self._discover_lof_codes(
             quote_map=discovery_quote_map,
             base_codes=base_codes,
-            normal_threshold_pct=normal_threshold_pct,
-            min_turnover_yuan=min_turnover_yuan,
             errors=errors,
         )
         codes = list(dict.fromkeys(base_codes + discovered_codes))
@@ -740,19 +738,17 @@ class LofMonitorService:
             errors.append(f"LOF 搜索池行情发现失败：{exc.message}")
             return {}
 
-    async def _discover_opportunity_codes(
+    async def _discover_lof_codes(
         self,
         *,
         quote_map: dict[str, LofMarketQuote],
         base_codes: list[str],
-        normal_threshold_pct: float,
-        min_turnover_yuan: float,
         errors: list[str],
     ) -> list[str]:
         if not quote_map:
             return []
-        cache_key = f"{normal_threshold_pct}:{min_turnover_yuan}"
-        cached = self.cache.get("lof_discovered_opportunity_codes", cache_key)
+        cache_key = "v1"
+        cached = self.cache.get("lof_discovered_lof_codes", cache_key)
         if cached and isinstance(cached.get("codes"), list):
             return [str(code) for code in cached["codes"]]
 
@@ -763,7 +759,6 @@ class LofMonitorService:
             if quote.code not in base_set
             and quote.latest_price is not None
             and quote.latest_price > 0
-            and (quote.turnover_yuan or 0) >= min_turnover_yuan
             and (looks_like_lof_code(quote.code) or looks_like_lof_name(quote.name))
         ]
         candidates.sort(key=lambda quote: (-(quote.turnover_yuan or 0), quote.code))
@@ -785,7 +780,7 @@ class LofMonitorService:
             for code, profile in [row]
             if profile is not None
         }
-        scored: list[tuple[str, float, float]] = []
+        discovered: list[tuple[str, float]] = []
         for quote in candidates:
             profile = profiles.get(quote.code)
             if profile is None:
@@ -796,16 +791,12 @@ class LofMonitorService:
                 or looks_like_lof_name(profile.fund_type)
             ):
                 continue
-            official_premium = self._premium_pct(quote.latest_price, profile.last_nav)
-            if official_premium is None:
-                continue
-            if abs(official_premium) >= normal_threshold_pct:
-                scored.append((quote.code, abs(official_premium), quote.turnover_yuan or 0))
-        scored.sort(key=lambda row: (-row[1], -row[2], row[0]))
-        codes = [code for code, _, _ in scored[:DISCOVERY_MAX_CODES]]
+            discovered.append((quote.code, quote.turnover_yuan or 0))
+        discovered.sort(key=lambda row: (-row[1], row[0]))
+        codes = [code for code, _ in discovered[:DISCOVERY_MAX_CODES]]
         if codes:
             self.cache.set(
-                "lof_discovered_opportunity_codes",
+                "lof_discovered_lof_codes",
                 cache_key,
                 {"codes": codes},
                 LOF_DISCOVERY_TTL_SECONDS,
