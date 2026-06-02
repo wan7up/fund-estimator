@@ -42,8 +42,8 @@ PROXY_QUOTE_TTL_SECONDS = 10 * 60
 DEFAULT_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_NORMAL_THRESHOLD_PCT = 2.0
 DEFAULT_STRONG_THRESHOLD_PCT = 5.0
-DISCOVERY_PROFILE_CONCURRENCY = 24
 DISCOVERY_MAX_CODES = 500
+DISCOVERY_DEEP_PROFILE_MAX_CODES = 80
 TRADING_PAUSED = "\u6682\u505c"
 
 
@@ -536,25 +536,41 @@ class LofMonitorService:
             errors=errors,
         )
         codes = list(dict.fromkeys(base_codes + discovered_codes))
+        deep_codes = list(dict.fromkeys(base_codes + discovered_codes[:DISCOVERY_DEEP_PROFILE_MAX_CODES]))
         quote_map = await self._get_market_quotes(codes, errors, preloaded=discovery_quote_map)
-        profile_results = await asyncio.gather(*(self._get_profile(code) for code in codes), return_exceptions=True)
+        profile_results = await asyncio.gather(*(self._get_profile(code) for code in deep_codes), return_exceptions=True)
+        profile_result_map = dict(zip(deep_codes, profile_results, strict=False))
         profile_map = {
             code: profile
-            for code, profile in zip(codes, profile_results, strict=False)
+            for code, profile in profile_result_map.items()
             if isinstance(profile, FundProfile)
         }
         status_results = await asyncio.gather(
             *(
                 self._get_status(code, profile if isinstance(profile, FundProfile) else None)
-                for code, profile in zip(codes, profile_results, strict=False)
+                for code, profile in profile_result_map.items()
             ),
             return_exceptions=True,
         )
-        haoetf_map = await self._get_haoetf_snapshots(codes, errors)
-        proxy_map = await self._get_proxy_changes(codes, errors, profiles=profile_map)
+        status_result_map = dict(zip(deep_codes, status_results, strict=False))
+        haoetf_map = await self._get_haoetf_snapshots(deep_codes, errors)
+        proxy_map = await self._get_proxy_changes(deep_codes, errors, profiles=profile_map)
         cooldown_keys = self.notice_cooldown_reader() if self.notice_cooldown_reader else set()
         items: list[LofPremiumItem] = []
-        for code, profile_result, status_result in zip(codes, profile_results, status_results, strict=False):
+        for code in codes:
+            profile_result = profile_result_map.get(code)
+            status_result = status_result_map.get(code)
+            if profile_result is None:
+                quote = quote_map.get(code)
+                if quote is not None:
+                    items.append(
+                        self._build_quote_only_item(
+                            quote=quote,
+                            min_turnover_yuan=min_turnover_yuan,
+                            now=scanned_at,
+                        )
+                    )
+                continue
             if isinstance(profile_result, Exception):
                 errors.append(f"{code}: {profile_result}")
                 if code in CORE_LOF_BY_CODE or quote_map.get(code) is not None:
@@ -599,6 +615,38 @@ class LofMonitorService:
         )
         self.cache.set("lof_opportunity_scan", cache_key, response.model_dump(mode="json"), LOF_SCAN_TTL_SECONDS)
         return response.model_copy(update={"items": response.items[:limit]})
+
+    def _build_quote_only_item(
+        self,
+        *,
+        quote: LofMarketQuote,
+        min_turnover_yuan: float,
+        now: datetime,
+    ) -> LofPremiumItem:
+        risks: list[str] = ["基金资料待补充"]
+        if quote.latest_price is None:
+            risks.append("场内行情缺失")
+        elif quote.turnover_yuan is None:
+            risks.append("成交额未知")
+        elif (quote.turnover_yuan or 0) < min_turnover_yuan:
+            risks.append("成交额不足")
+        return LofPremiumItem(
+            code=quote.code,
+            name=quote.name,
+            exchange_price=quote.latest_price,
+            exchange_change_pct=quote.change_pct,
+            exchange_turnover_yuan=quote.turnover_yuan,
+            signal_basis="none",
+            direction="unknown",
+            level="none",
+            is_opportunity=False,
+            actionable=False,
+            purchase_status="unknown",
+            redemption_status="unknown",
+            risks=list(dict.fromkeys(risks)),
+            data_source=f"profile:pending, quote:{quote.source}",
+            updated_at=now,
+        )
 
     def _build_unavailable_item(
         self,
@@ -651,28 +699,24 @@ class LofMonitorService:
         )
 
     async def get_item(self, code: str, *, device_id: str = "default") -> LofPremiumItem:
-        response = await self.get_opportunities(device_id=device_id, limit=500)
-        item = next((row for row in response.items if row.code == code), None)
-        if item is None:
-            profile = await self.estimator.get_profile(code)
-            quote_map = await self._get_market_quotes([code], [])
-            haoetf_map = await self._get_haoetf_snapshots([code], [])
-            proxy_map = await self._get_proxy_changes([code], [], profiles={code: profile})
-            status = await self._get_status(code, profile)
-            return self._build_item(
-                code=code,
-                profile=profile,
-                quote=quote_map.get(code),
-                status=status,
-                haoetf_snapshot=haoetf_map.get(code),
-                proxy_changes=proxy_map,
-                normal_threshold_pct=DEFAULT_NORMAL_THRESHOLD_PCT,
-                strong_threshold_pct=DEFAULT_STRONG_THRESHOLD_PCT,
-                min_turnover_yuan=DEFAULT_MIN_TURNOVER_YUAN,
-                cooldown_keys=set(),
-                now=datetime.now(UTC),
-            )
-        return item
+        profile = await self.estimator.get_profile(code)
+        quote_map = await self._get_market_quotes([code], [])
+        haoetf_map = await self._get_haoetf_snapshots([code], [])
+        proxy_map = await self._get_proxy_changes([code], [], profiles={code: profile})
+        status = await self._get_status(code, profile)
+        return self._build_item(
+            code=code,
+            profile=profile,
+            quote=quote_map.get(code),
+            status=status,
+            haoetf_snapshot=haoetf_map.get(code),
+            proxy_changes=proxy_map,
+            normal_threshold_pct=DEFAULT_NORMAL_THRESHOLD_PCT,
+            strong_threshold_pct=DEFAULT_STRONG_THRESHOLD_PCT,
+            min_turnover_yuan=DEFAULT_MIN_TURNOVER_YUAN,
+            cooldown_keys=set(),
+            now=datetime.now(UTC),
+        )
 
     async def _get_profile(self, code: str) -> FundProfile:
         return await self.estimator.get_profile(code)
@@ -763,34 +807,8 @@ class LofMonitorService:
         ]
         candidates.sort(key=lambda quote: (-(quote.turnover_yuan or 0), quote.code))
 
-        semaphore = asyncio.Semaphore(DISCOVERY_PROFILE_CONCURRENCY)
-
-        async def fetch_profile(code: str) -> tuple[str, FundProfile | None]:
-            async with semaphore:
-                try:
-                    return code, await self._get_profile(code)
-                except Exception:
-                    return code, None
-
-        profile_rows = await asyncio.gather(*(fetch_profile(quote.code) for quote in candidates), return_exceptions=True)
-        profiles = {
-            code: profile
-            for row in profile_rows
-            if not isinstance(row, Exception)
-            for code, profile in [row]
-            if profile is not None
-        }
         discovered: list[tuple[str, float]] = []
         for quote in candidates:
-            profile = profiles.get(quote.code)
-            if profile is None:
-                continue
-            if not (
-                quote.code in CORE_LOF_BY_CODE
-                or looks_like_lof_name(profile.name)
-                or looks_like_lof_name(profile.fund_type)
-            ):
-                continue
             discovered.append((quote.code, quote.turnover_yuan or 0))
         discovered.sort(key=lambda row: (-row[1], row[0]))
         codes = [code for code, _ in discovered[:DISCOVERY_MAX_CODES]]
