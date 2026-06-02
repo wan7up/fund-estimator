@@ -25,6 +25,7 @@ from fund_estimator.models.schema import (
 )
 from fund_estimator.services.estimator import FundEstimatorService
 from fund_estimator.services.exceptions import AppError
+from fund_estimator.services.http_settings import http_trust_env
 
 
 THEME_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -168,7 +169,7 @@ class FundComparisonService:
             return profile.details.trading.purchase_limit_yuan
         url = f"https://fundf10.eastmoney.com/jjfl_{code}.html"
         try:
-            async with httpx.AsyncClient(timeout=4.0, headers=DEFAULT_HEADERS, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=4.0, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
                 response = await client.get(url)
                 response.raise_for_status()
         except httpx.HTTPError:

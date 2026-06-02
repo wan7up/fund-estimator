@@ -47,6 +47,7 @@ class FundEstimatorService:
         mock_holdings_source: Any | None = None,
         mock_quote_source: Any | None = None,
         allow_mock_fallback: bool = True,
+        allow_mock_cache: bool | None = None,
     ) -> None:
         self.fund_source = fund_source
         self.holdings_source = holdings_source
@@ -56,6 +57,7 @@ class FundEstimatorService:
         self.mock_holdings_source = mock_holdings_source
         self.mock_quote_source = mock_quote_source
         self.allow_mock_fallback = allow_mock_fallback
+        self.allow_mock_cache = allow_mock_fallback if allow_mock_cache is None else allow_mock_cache
 
     async def search_funds(self, query: str) -> list[Any]:
         try:
@@ -531,7 +533,7 @@ class FundEstimatorService:
         missing: list[str] = []
         for code in stock_codes:
             payload = self.cache.get("stock_quote", code)
-            if payload:
+            if payload and self._cache_payload_allowed(payload):
                 cached[code] = StockQuote.model_validate(payload)
             else:
                 missing.append(code)
@@ -560,7 +562,7 @@ class FundEstimatorService:
         allow_stale: bool,
     ) -> TModel:
         cached = self.cache.get(namespace, key)
-        if cached:
+        if cached and self._cache_payload_allowed(cached):
             return model_cls.model_validate(cached)
 
         try:
@@ -571,10 +573,15 @@ class FundEstimatorService:
             if not allow_stale:
                 raise
             stale_payload = self.cache.get(namespace, key, include_expired=True)
-            if stale_payload:
+            if stale_payload and self._cache_payload_allowed(stale_payload):
                 stale_payload["stale"] = True
                 return model_cls.model_validate(stale_payload)
             raise
+
+    def _cache_payload_allowed(self, payload: dict[str, Any]) -> bool:
+        if self.allow_mock_cache:
+            return True
+        return payload.get("source") != "mock"
 
     @staticmethod
     def _build_mode_result(

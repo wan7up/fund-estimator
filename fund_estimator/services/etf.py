@@ -14,6 +14,7 @@ from fund_estimator.models.schema import FundProfile
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.etf_config import CORE_CROSS_BORDER_ETFS, CORE_ETF_BY_CODE, looks_like_cross_border_etf
 from fund_estimator.services.exceptions import AppError, DataSourceError
+from fund_estimator.services.http_settings import http_trust_env
 from fund_estimator.services.lof import (
     DEFAULT_MIN_TURNOVER_YUAN,
     DEFAULT_NORMAL_THRESHOLD_PCT,
@@ -57,7 +58,7 @@ class EastmoneyEtfMarketDataSource:
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/center/gridlist.html#fund_etf"}
         quotes: dict[str, EtfMarketQuote] = {}
         quote_time = datetime.now(UTC)
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             total = None
             page = 1
             while total is None or len(quotes) < total:

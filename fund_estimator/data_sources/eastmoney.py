@@ -29,6 +29,7 @@ from fund_estimator.models.schema import (
     StockQuote,
 )
 from fund_estimator.services.exceptions import AppError, DataSourceError
+from fund_estimator.services.http_settings import http_trust_env
 
 
 DEFAULT_HEADERS = {
@@ -436,7 +437,7 @@ class EastmoneyFundDataSource:
             fund_type = None
 
         url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js?v={int(time.time() * 1000)}"
-        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url)
                 if _is_notfound_redirect(response):
@@ -461,7 +462,7 @@ class EastmoneyFundDataSource:
         if self._search_cache is not None:
             return self._search_cache
         url = f"https://fund.eastmoney.com/js/fundcode_search.js?v={int(time.time() * 1000)}"
-        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
@@ -489,7 +490,7 @@ class EastmoneyHoldingsDataSource:
             "month": "",
             "rt": str(time.time()),
         }
-        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
@@ -521,7 +522,7 @@ class EastmoneyQuoteDataSource:
             "_": str(int(time.time() * 1000)),
         }
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/"}
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url, params=params)
                 response.raise_for_status()

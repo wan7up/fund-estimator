@@ -24,6 +24,7 @@ from fund_estimator.models.lof import (
 from fund_estimator.models.schema import FundProfile, FundSearchResult
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
+from fund_estimator.services.http_settings import http_trust_env
 from fund_estimator.services.lof_config import (
     CORE_CROSS_BORDER_LOFS,
     CORE_LOF_BY_CODE,
@@ -115,7 +116,7 @@ class EastmoneyLofMarketDataSource:
             "_": str(int(time.time() * 1000)),
         }
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/"}
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url, params=params)
                 response.raise_for_status()
@@ -155,7 +156,7 @@ class EastmoneyLofMarketDataSource:
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/center/gridlist.html#fund_lof"}
         quotes: dict[str, LofMarketQuote] = {}
         quote_time = datetime.now(UTC)
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             total = None
             page = 1
             while total is None or len(quotes) < total:
@@ -220,7 +221,7 @@ class EastmoneyLofTradingStatusDataSource:
 
     async def get_status(self, code: str, profile: FundProfile) -> LofTradingStatus:
         url = f"https://fundf10.eastmoney.com/jjfl_{code}.html"
-        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=DEFAULT_HEADERS, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
@@ -327,7 +328,7 @@ class YahooProxyDataSource:
         if not unique_symbols:
             return {}
         headers = {"User-Agent": "Mozilla/5.0 fund-estimator/0.1"}
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             rows = await asyncio.gather(
                 *(self._get_chart_change(client, symbol, base_date=base_date) for symbol in unique_symbols),
                 return_exceptions=True,
@@ -384,7 +385,7 @@ class HaoEtfDataSource:
 
     async def get_snapshots(self, codes: list[str]) -> dict[str, HaoEtfSnapshot]:
         headers = {"User-Agent": "Mozilla/5.0 fund-estimator/0.1"}
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
             rows = await asyncio.gather(
                 *(self._get_snapshot(client, code) for code in codes),
                 return_exceptions=True,

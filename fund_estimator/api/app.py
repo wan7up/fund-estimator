@@ -108,6 +108,7 @@ def create_estimator_service() -> FundEstimatorService:
             quote_source=MockQuoteDataSource(),
             cache=cache,
             allow_mock_fallback=False,
+            allow_mock_cache=True,
         )
     return FundEstimatorService(
         fund_source=EastmoneyFundDataSource(),
@@ -118,6 +119,7 @@ def create_estimator_service() -> FundEstimatorService:
         mock_holdings_source=MockHoldingsDataSource(),
         mock_quote_source=MockQuoteDataSource(),
         allow_mock_fallback=allow_mock_fallback,
+        allow_mock_cache=allow_mock_fallback,
     )
 
 

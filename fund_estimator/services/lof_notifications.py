@@ -12,6 +12,7 @@ import httpx
 
 from fund_estimator.models.lof import LofFeishuConnectResponse, LofNoticeStatus, LofOpportunityResponse, LofPremiumItem
 from fund_estimator.services.exceptions import AppError
+from fund_estimator.services.http_settings import http_trust_env
 
 
 TRUTHY = {"1", "true", "yes", "on", "enabled"}
@@ -672,7 +673,7 @@ class LofNoticeService:
 
     def _feishu_registration_post(self, base_url: str, form_body: dict[str, str]) -> dict[str, Any]:
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=False) as client:
+        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=http_trust_env()) as client:
             response = client.post(
                 f"{base_url}/oauth/v1/app/registration",
                 headers=headers,
@@ -686,14 +687,14 @@ class LofNoticeService:
         headers = {"Content-Type": "application/json; charset=utf-8"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=False) as client:
+        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=http_trust_env()) as client:
             response = client.post(f"{FEISHU_API_BASE}{path}", headers=headers, json=json_body)
         response.raise_for_status()
         return response.json()
 
     def _feishu_get(self, path: str, *, token: str) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {token}"}
-        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=False) as client:
+        with httpx.Client(timeout=max(5, self.config.timeout_seconds), trust_env=http_trust_env()) as client:
             response = client.get(f"{FEISHU_API_BASE}{path}", headers=headers)
         response.raise_for_status()
         return response.json()

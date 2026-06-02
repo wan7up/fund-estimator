@@ -9,6 +9,7 @@ from fund_estimator.data_sources.eastmoney import infer_market
 from fund_estimator.models.lof import LofMarketQuote
 from fund_estimator.models.schema import StockQuote
 from fund_estimator.services.exceptions import DataSourceError
+from fund_estimator.services.http_settings import http_trust_env
 
 
 SINA_HEADERS = {
@@ -119,7 +120,7 @@ class SinaQuoteDataSource:
         if not symbols:
             return {}
         url = f"https://hq.sinajs.cn/list={','.join(symbols)}"
-        async with httpx.AsyncClient(timeout=self.timeout, headers=SINA_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=SINA_HEADERS, trust_env=http_trust_env()) as client:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
@@ -143,7 +144,7 @@ class SinaLofMarketDataSource:
         if not symbols:
             return {}
         batches = [symbols[index : index + SINA_BATCH_SIZE] for index in range(0, len(symbols), SINA_BATCH_SIZE)]
-        async with httpx.AsyncClient(timeout=self.timeout, headers=SINA_HEADERS, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, headers=SINA_HEADERS, trust_env=http_trust_env()) as client:
             rows = []
             for batch in batches:
                 url = f"https://hq.sinajs.cn/list={','.join(batch)}"
