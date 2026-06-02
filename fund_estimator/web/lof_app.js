@@ -26,8 +26,8 @@ const state = {
   watchlist: [],
   selectedCode: null,
   filter: "all",
-  showPurchasePaused: true,
-  lofSort: { key: null, direction: "desc" },
+  showPurchasePaused: false,
+  lofSort: { key: "official_premium_pct", direction: "desc" },
   scanInFlight: false,
   lastResponse: null,
   noticeStatus: null,
@@ -133,12 +133,22 @@ function statusText(value) {
   return value;
 }
 
+function fmtFee(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  return `费率${fmt(value, 2)}%`;
+}
+
+function statusLine(label, status, parts = []) {
+  return [label + statusText(status), ...parts.filter(Boolean)].map(escapeHtml).join(" · ");
+}
+
 function statusCell(item) {
-  const limit = item.daily_purchase_limit_yuan ? ` · 限 ${fmtMoney(item.daily_purchase_limit_yuan)}` : "";
+  const limit = item.daily_purchase_limit_yuan ? `限额${fmtMoney(item.daily_purchase_limit_yuan)}` : null;
+  const fee = fmtFee(item.fee_rate_pct);
   return `
     <div class="status-cell">
-      <span>申购：${escapeHtml(statusText(item.purchase_status))}${escapeHtml(limit)}</span>
-      <small>赎回：${escapeHtml(statusText(item.redemption_status))}</small>
+      <span>${statusLine("申购", item.purchase_status, [limit, fee])}</span>
+      <small>${statusLine("赎回", item.redemption_status, [fee])}</small>
     </div>`;
 }
 
