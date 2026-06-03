@@ -170,6 +170,86 @@ def test_compare_api_validates_codes(tmp_path, monkeypatch):
     assert missing_response.json()["error"]["code"] == "FUND_NOT_FOUND"
 
 
+def test_compare_ai_disabled_without_password(tmp_path, monkeypatch):
+    monkeypatch.delenv("FUND_ESTIMATOR_COMPARE_AI_PASSWORD", raising=False)
+    client = make_client(tmp_path, monkeypatch)
+
+    status_response = client.get("/api/compare/ai/status")
+    login_response = client.post("/api/compare/ai/login", json={"password": "pw"})
+
+    assert status_response.status_code == 200
+    assert status_response.json()["enabled"] is False
+    assert login_response.status_code == 403
+    assert login_response.json()["error"]["code"] == "COMPARE_AI_DISABLED"
+
+
+def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
+    from fund_estimator.services import compare_ai as compare_ai_module
+
+    class FakeAiClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def get(self, url: str):
+            import httpx
+
+            return httpx.Response(
+                200,
+                json={"data": [{"id": "gpt-test"}, {"id": "gpt-test-mini"}]},
+                request=httpx.Request("GET", url),
+            )
+
+        async def post(self, url: str, json: dict):
+            import httpx
+
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "总体判断\nAI 已按规则评价。"}}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setenv("FUND_ESTIMATOR_COMPARE_AI_PASSWORD", "secret")
+    monkeypatch.setattr(compare_ai_module.httpx, "AsyncClient", FakeAiClient)
+    client = make_client(tmp_path, monkeypatch)
+
+    wrong_login = client.post("/api/compare/ai/login", json={"password": "bad"})
+    login = client.post("/api/compare/ai/login", json={"password": "secret"})
+    invalid_config = client.put(
+        "/api/compare/ai/config",
+        json={"base_url": "http://127.0.0.1:8000/v1", "api_key": "sk-test"},
+    )
+    config = client.put(
+        "/api/compare/ai/config",
+        json={"base_url": "http://api.example.com/v1", "api_key": "sk-test-123456"},
+    )
+    models = client.get("/api/compare/ai/models")
+    configured = client.put(
+        "/api/compare/ai/config",
+        json={"selected_model": "gpt-test-mini", "persona_id": "dalio_balance"},
+    )
+    compare = client.post("/api/compare", json={"codes": ["001438", "001439"], "theme_hint": "混合"})
+    commentary = client.post("/api/compare/ai/commentary", json={"compare_result": compare.json()})
+
+    assert wrong_login.status_code == 401
+    assert login.status_code == 200
+    assert invalid_config.status_code == 422
+    assert config.status_code == 200
+    assert config.json()["base_url_is_http"] is True
+    assert config.json()["api_key_masked"] == "sk-tes...3456"
+    assert config.json()["configured"] is False
+    assert models.json()["models"] == ["gpt-test", "gpt-test-mini"]
+    assert configured.json()["configured"] is True
+    assert commentary.status_code == 200
+    assert commentary.json()["model"] == "gpt-test-mini"
+    assert "AI 已按规则评价" in commentary.json()["commentary"]
+
+
 def test_lof_monitor_refresh_and_cache_fallback(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 

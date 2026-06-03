@@ -3,7 +3,15 @@ const state = {
   strategy: "balanced",
   result: null,
   loading: false,
+  ai: {
+    status: null,
+    models: [],
+    loading: false,
+    commentary: null,
+  },
 };
+
+const DEFAULT_AI_BASE_URL = "https://api.openai.com/v1";
 
 const STRATEGY_LABELS = {
   balanced: "稳健综合",
@@ -94,6 +102,25 @@ const els = {
   pairGrid: document.querySelector("#pairGrid"),
   warningPanel: document.querySelector("#warningPanel"),
   warningList: document.querySelector("#warningList"),
+  aiPanel: document.querySelector("#aiPanel"),
+  aiStatusText: document.querySelector("#aiStatusText"),
+  aiGenerateBtn: document.querySelector("#aiGenerateBtn"),
+  aiDisabled: document.querySelector("#aiDisabled"),
+  aiLoginForm: document.querySelector("#aiLoginForm"),
+  aiPasswordInput: document.querySelector("#aiPasswordInput"),
+  aiConfig: document.querySelector("#aiConfig"),
+  aiBaseUrlInput: document.querySelector("#aiBaseUrlInput"),
+  aiKeyInput: document.querySelector("#aiKeyInput"),
+  aiHttpWarning: document.querySelector("#aiHttpWarning"),
+  aiSaveFetchBtn: document.querySelector("#aiSaveFetchBtn"),
+  aiFetchModelsBtn: document.querySelector("#aiFetchModelsBtn"),
+  aiModelSelect: document.querySelector("#aiModelSelect"),
+  aiPersonaSelect: document.querySelector("#aiPersonaSelect"),
+  aiCustomPersonaWrap: document.querySelector("#aiCustomPersonaWrap"),
+  aiCustomPersonaInput: document.querySelector("#aiCustomPersonaInput"),
+  aiSaveConfigBtn: document.querySelector("#aiSaveConfigBtn"),
+  aiError: document.querySelector("#aiError"),
+  aiOutput: document.querySelector("#aiOutput"),
 };
 
 function escapeHtml(value) {
@@ -210,6 +237,202 @@ async function loadSourceStatus() {
   }
 }
 
+function setAiError(message) {
+  if (!message) {
+    els.aiError.hidden = true;
+    els.aiError.textContent = "";
+    return;
+  }
+  els.aiError.hidden = false;
+  els.aiError.textContent = message;
+}
+
+function updateAiHttpWarning() {
+  const value = els.aiBaseUrlInput.value.trim().toLowerCase();
+  els.aiHttpWarning.hidden = !value.startsWith("http://");
+}
+
+function renderAiPersonas(personas = []) {
+  if (!personas.length || els.aiPersonaSelect.options.length) return;
+  els.aiPersonaSelect.innerHTML = personas
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
+function renderAiModels(models = [], selected = "") {
+  const unique = [];
+  for (const model of [...models, selected].filter(Boolean)) {
+    if (!unique.includes(model)) unique.push(model);
+  }
+  els.aiModelSelect.innerHTML = unique.length
+    ? `<option value="">选择模型</option>` + unique.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")
+    : `<option value="">先获取模型</option>`;
+  if (selected) {
+    els.aiModelSelect.value = selected;
+  }
+}
+
+function syncAiInputs(status) {
+  renderAiPersonas(status.personas || []);
+  els.aiBaseUrlInput.value = status.base_url || DEFAULT_AI_BASE_URL;
+  els.aiKeyInput.value = "";
+  els.aiKeyInput.placeholder = status.api_key_masked ? `已保存 ${status.api_key_masked}，留空不修改` : "API Key";
+  renderAiModels(state.ai.models, status.selected_model || "");
+  els.aiPersonaSelect.value = status.persona_id || "researcher";
+  els.aiCustomPersonaInput.value = status.custom_persona || "";
+  els.aiCustomPersonaWrap.hidden = els.aiPersonaSelect.value !== "custom";
+  updateAiHttpWarning();
+}
+
+function renderAiPanel() {
+  const status = state.ai.status;
+  const busy = state.ai.loading;
+  els.aiGenerateBtn.disabled = busy || !state.result || !status?.enabled || !status.authenticated || !status.configured;
+  els.aiDisabled.hidden = true;
+  els.aiLoginForm.hidden = true;
+  els.aiConfig.hidden = true;
+  els.aiSaveFetchBtn.disabled = busy;
+  els.aiFetchModelsBtn.disabled = busy || !status?.authenticated;
+  els.aiSaveConfigBtn.disabled = busy;
+  els.aiGenerateBtn.textContent = busy ? "处理中" : "生成评价";
+
+  if (!status) {
+    els.aiStatusText.textContent = "检查配置中";
+  } else if (!status.enabled) {
+    els.aiStatusText.textContent = "未启用";
+    els.aiDisabled.hidden = false;
+  } else if (!status.authenticated) {
+    els.aiStatusText.textContent = "需要验证";
+    els.aiLoginForm.hidden = false;
+  } else {
+    els.aiConfig.hidden = false;
+    els.aiStatusText.textContent = status.configured ? `${status.selected_model} · 已配置` : "待选择模型";
+  }
+
+  if (state.ai.commentary) {
+    els.aiOutput.classList.remove("empty");
+    els.aiOutput.textContent = state.ai.commentary.commentary || "";
+  } else {
+    els.aiOutput.classList.add("empty");
+    els.aiOutput.textContent = state.result ? "可基于当前规则结果生成 AI 评价" : "完成基金对比后，可生成 AI 评价";
+  }
+}
+
+async function loadAiStatus() {
+  try {
+    const status = await api("/api/compare/ai/status");
+    state.ai.status = status;
+    syncAiInputs(status);
+    setAiError("");
+  } catch (error) {
+    setAiError(error.message);
+  } finally {
+    renderAiPanel();
+  }
+}
+
+function collectAiConfigPayload() {
+  const payload = {
+    base_url: els.aiBaseUrlInput.value.trim() || DEFAULT_AI_BASE_URL,
+    selected_model: els.aiModelSelect.value || null,
+    persona_id: els.aiPersonaSelect.value || "researcher",
+    custom_persona: els.aiCustomPersonaInput.value.trim() || null,
+  };
+  const key = els.aiKeyInput.value.trim();
+  if (key) {
+    payload.api_key = key;
+  }
+  return payload;
+}
+
+async function saveAiConfig(fetchAfterSave = false) {
+  state.ai.loading = true;
+  renderAiPanel();
+  setAiError("");
+  try {
+    const status = await api("/api/compare/ai/config", {
+      method: "PUT",
+      body: JSON.stringify(collectAiConfigPayload()),
+    });
+    state.ai.status = status;
+    syncAiInputs(status);
+    if (fetchAfterSave) {
+      const data = await api("/api/compare/ai/models");
+      state.ai.models = data.models || [];
+      renderAiModels(state.ai.models, state.ai.status.selected_model || "");
+    }
+  } catch (error) {
+    setAiError(error.message);
+  } finally {
+    state.ai.loading = false;
+    renderAiPanel();
+  }
+}
+
+async function fetchAiModels() {
+  state.ai.loading = true;
+  renderAiPanel();
+  setAiError("");
+  try {
+    const data = await api("/api/compare/ai/models");
+    state.ai.models = data.models || [];
+    renderAiModels(state.ai.models, state.ai.status?.selected_model || "");
+  } catch (error) {
+    setAiError(error.message);
+  } finally {
+    state.ai.loading = false;
+    renderAiPanel();
+  }
+}
+
+async function loginAi(event) {
+  event.preventDefault();
+  const password = els.aiPasswordInput.value.trim();
+  if (!password) {
+    setAiError("请输入 AI 管理密码");
+    return;
+  }
+  state.ai.loading = true;
+  renderAiPanel();
+  setAiError("");
+  try {
+    const status = await api("/api/compare/ai/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    els.aiPasswordInput.value = "";
+    state.ai.status = status;
+    syncAiInputs(status);
+  } catch (error) {
+    setAiError(error.message);
+  } finally {
+    state.ai.loading = false;
+    renderAiPanel();
+  }
+}
+
+async function generateAiCommentary() {
+  if (!state.result) {
+    setAiError("请先完成基金对比");
+    return;
+  }
+  state.ai.loading = true;
+  state.ai.commentary = null;
+  renderAiPanel();
+  setAiError("");
+  try {
+    state.ai.commentary = await api("/api/compare/ai/commentary", {
+      method: "POST",
+      body: JSON.stringify({ compare_result: state.result }),
+    });
+  } catch (error) {
+    setAiError(error.message);
+  } finally {
+    state.ai.loading = false;
+    renderAiPanel();
+  }
+}
+
 function renderSelection() {
   els.selectionStatus.textContent = `已选择 ${state.selected.length}/4`;
   if (!state.selected.length) {
@@ -317,6 +540,7 @@ async function compareFunds() {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    state.ai.commentary = null;
     updateSelectedNames(state.result.funds);
     renderResult();
   } catch (error) {
@@ -338,6 +562,7 @@ function updateSelectedNames(funds) {
 }
 
 function renderEmptyResult() {
+  state.ai.commentary = null;
   els.resultSummary.hidden = true;
   els.rankingMeta.textContent = "等待结果";
   els.scoreMeta.textContent = "等待结果";
@@ -349,6 +574,7 @@ function renderEmptyResult() {
   els.warningPanel.hidden = true;
   els.warningList.innerHTML = "";
   renderMethodology();
+  renderAiPanel();
 }
 
 function renderResult() {
@@ -370,6 +596,7 @@ function renderResult() {
   renderMethodology(result.score_factors);
   renderPairs(result);
   renderWarnings(result);
+  renderAiPanel();
 }
 
 function renderRanking(result) {
@@ -557,6 +784,30 @@ els.compareBtn.addEventListener("click", () => {
   compareFunds();
 });
 
+els.aiLoginForm.addEventListener("submit", loginAi);
+
+els.aiBaseUrlInput.addEventListener("input", updateAiHttpWarning);
+
+els.aiPersonaSelect.addEventListener("change", () => {
+  els.aiCustomPersonaWrap.hidden = els.aiPersonaSelect.value !== "custom";
+});
+
+els.aiSaveFetchBtn.addEventListener("click", () => {
+  saveAiConfig(true);
+});
+
+els.aiFetchModelsBtn.addEventListener("click", () => {
+  fetchAiModels();
+});
+
+els.aiSaveConfigBtn.addEventListener("click", () => {
+  saveAiConfig(false);
+});
+
+els.aiGenerateBtn.addEventListener("click", () => {
+  generateAiCommentary();
+});
+
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".search")) {
     els.searchResults.classList.remove("active");
@@ -564,5 +815,6 @@ document.addEventListener("click", (event) => {
 });
 
 loadSourceStatus();
+loadAiStatus();
 renderSelection();
 renderEmptyResult();

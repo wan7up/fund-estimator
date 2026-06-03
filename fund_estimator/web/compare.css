@@ -26,7 +26,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -627,6 +629,132 @@ td:first-child {
   color: var(--muted);
 }
 
+.ai-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.ai-state,
+.ai-error,
+.ai-warning {
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.ai-state {
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.ai-error {
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.ai-error[hidden],
+.ai-warning[hidden] {
+  display: none;
+}
+
+.ai-warning {
+  border: 1px solid #facc15;
+  background: #fffbeb;
+  color: #854d0e;
+}
+
+.ai-login {
+  display: grid;
+  grid-template-columns: minmax(180px, 320px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-config {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.ai-config label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-config span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-login input,
+.ai-config input,
+.ai-config select,
+.ai-config textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+
+.ai-login input,
+.ai-config input,
+.ai-config select {
+  height: 40px;
+  padding: 0 12px;
+}
+
+.ai-config textarea {
+  min-height: 78px;
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.ai-login input:focus,
+.ai-config input:focus,
+.ai-config select:focus,
+.ai-config textarea:focus {
+  border-color: #7db0ff;
+}
+
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-actions button {
+  padding: 0 12px;
+}
+
+#aiHttpWarning,
+#aiCustomPersonaWrap {
+  grid-column: 1 / -1;
+}
+
+.ai-output {
+  min-height: 96px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfe;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.ai-output.empty {
+  min-height: 56px;
+  border-color: transparent;
+  background: transparent;
+}
+
 .mobile-cards {
   display: none;
 }
@@ -727,5 +855,15 @@ td:first-child {
 
   .methodology-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ai-login,
+  .ai-config {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-actions button,
+  #aiGenerateBtn {
+    width: 100%;
   }
 }

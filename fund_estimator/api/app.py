@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, Query, Request
+from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -35,6 +35,12 @@ from fund_estimator.models.schema import (
     ApiErrorResponse,
     BatchEstimateItem,
     BatchEstimateRequest,
+    CompareAiCommentaryRequest,
+    CompareAiCommentaryResponse,
+    CompareAiConfigUpdate,
+    CompareAiLoginRequest,
+    CompareAiModelsResponse,
+    CompareAiStatus,
     CompareRequest,
     CompareResponse,
     EstimateResponse,
@@ -47,6 +53,11 @@ from fund_estimator.models.schema import (
     WatchlistReorderRequest,
 )
 from fund_estimator.services.cache import SQLiteCache
+from fund_estimator.services.compare_ai import (
+    COMPARE_AI_SESSION_COOKIE,
+    COMPARE_AI_SESSION_DAYS,
+    CompareAiService,
+)
 from fund_estimator.services.comparison import FundComparisonService
 from fund_estimator.services.estimator import FundEstimatorService
 from fund_estimator.services.exceptions import AppError
@@ -172,6 +183,15 @@ def create_etf_monitor_service(estimator: FundEstimatorService) -> EtfMonitorSer
     )
 
 
+def create_compare_ai_service(runtime_config: dict[str, object]) -> CompareAiService:
+    cache_path = Path(str(runtime_config["cache_path"]))
+    data_dir = cache_path.parent if cache_path.parent != Path("") else Path("data")
+    return CompareAiService(
+        data_dir=data_dir,
+        admin_password=os.getenv("FUND_ESTIMATOR_COMPARE_AI_PASSWORD"),
+    )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="基金工具箱",
@@ -186,6 +206,7 @@ def create_app() -> FastAPI:
     lof_notice_scheduler = LofDailyNoticeScheduler(monitor=lof_monitor, notice=lof_notice)
     etf_monitor = create_etf_monitor_service(estimator)
     runtime_config = get_runtime_config()
+    compare_ai = create_compare_ai_service(runtime_config)
 
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -304,6 +325,38 @@ def create_app() -> FastAPI:
     @app.post("/api/compare", response_model=CompareResponse)
     async def compare_funds(request: CompareRequest) -> CompareResponse:
         return await comparison.compare(request)
+
+    @app.get("/api/compare/ai/status", response_model=CompareAiStatus)
+    async def compare_ai_status(request: Request) -> CompareAiStatus:
+        return compare_ai.status(request.cookies.get(COMPARE_AI_SESSION_COOKIE))
+
+    @app.post("/api/compare/ai/login", response_model=CompareAiStatus)
+    async def compare_ai_login(request: CompareAiLoginRequest, response: Response) -> CompareAiStatus:
+        token = compare_ai.login(request.password)
+        response.set_cookie(
+            COMPARE_AI_SESSION_COOKIE,
+            token,
+            max_age=COMPARE_AI_SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return compare_ai.status(token)
+
+    @app.put("/api/compare/ai/config", response_model=CompareAiStatus)
+    async def compare_ai_config(request: CompareAiConfigUpdate, raw_request: Request) -> CompareAiStatus:
+        return compare_ai.update_config(request, raw_request.cookies.get(COMPARE_AI_SESSION_COOKIE))
+
+    @app.get("/api/compare/ai/models", response_model=CompareAiModelsResponse)
+    async def compare_ai_models(request: Request) -> CompareAiModelsResponse:
+        return await compare_ai.list_models(request.cookies.get(COMPARE_AI_SESSION_COOKIE))
+
+    @app.post("/api/compare/ai/commentary", response_model=CompareAiCommentaryResponse)
+    async def compare_ai_commentary(
+        request: CompareAiCommentaryRequest,
+        raw_request: Request,
+    ) -> CompareAiCommentaryResponse:
+        return await compare_ai.create_commentary(request, raw_request.cookies.get(COMPARE_AI_SESSION_COOKIE))
 
     @app.get("/api/watchlist", response_model=list[WatchlistItem])
     async def get_watchlist(x_device_id: str | None = Header(None, alias="X-Device-Id")) -> list[WatchlistItem]:

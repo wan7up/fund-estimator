@@ -333,3 +333,57 @@ class CompareResponse(BaseModel):
     pair_similarities: list[ComparePairSimilarity]
     score_factors: list[CompareScoreFactor] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class CompareAiPersona(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class CompareAiStatus(BaseModel):
+    enabled: bool
+    authenticated: bool = False
+    configured: bool = False
+    base_url: str | None = None
+    base_url_is_http: bool = False
+    selected_model: str | None = None
+    persona_id: str = "researcher"
+    custom_persona: str | None = None
+    api_key_masked: str | None = None
+    personas: list[CompareAiPersona] = Field(default_factory=list)
+
+
+class CompareAiLoginRequest(BaseModel):
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class CompareAiConfigUpdate(BaseModel):
+    base_url: str | None = Field(None, max_length=512)
+    api_key: str | None = Field(None, max_length=4096)
+    selected_model: str | None = Field(None, max_length=160)
+    persona_id: str | None = Field(None, max_length=64)
+    custom_persona: str | None = Field(None, max_length=800)
+
+    @field_validator("base_url", "api_key", "selected_model", "persona_id", "custom_persona")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class CompareAiModelsResponse(BaseModel):
+    models: list[str] = Field(default_factory=list)
+
+
+class CompareAiCommentaryRequest(BaseModel):
+    compare_result: CompareResponse
+
+
+class CompareAiCommentaryResponse(BaseModel):
+    generated_at: datetime
+    model: str
+    persona_id: str
+    commentary: str
