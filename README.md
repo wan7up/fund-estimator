@@ -186,7 +186,9 @@ LOF 工具第一版聚焦核心跨境 LOF 和个人自选，不做宽泛全市�
 - 每日飞书摘要：默认 10:00 发送可操作 LOF 代码、估算溢价、参考标的期间涨幅、成交额和限额。
 - 飞书即时通知仍保留在 `scan --notify`，默认触发线是估算溢价达到 3%，或估算折价达到 -5%。
 
-后台 worker：
+每日飞书摘要由 Web 应用内置调度器处理：页面里修改通知时间或开关后，后端会保存设置并立即重排下一次执行时间；当前 Docker 部署不需要额外启用 systemd timer。
+
+手动 worker：
 
 ```bash
 python -m fund_estimator.lof_worker daily-summary
@@ -194,14 +196,14 @@ python -m fund_estimator.lof_worker scan --notify
 python -m fund_estimator.lof_worker send-test
 ```
 
-systemd 部署文件：
+备用 systemd 部署文件：
 
 - `deploy/systemd/fund-estimator-lof-daily-notice.service`
 - `deploy/systemd/fund-estimator-lof-daily-notice.timer`
 - `deploy/systemd/fund-estimator-lof-worker.service`
 - `deploy/systemd/fund-estimator-lof-worker.timer`
 
-固定早报建议启用 `fund-estimator-lof-daily-notice.timer`。它每 5 分钟唤醒一次，worker 会读取页面设置的通知开关和时间，并保证交易日每天只发一次。`fund-estimator-lof-worker.timer` 是每分钟扫描/即时通知方案，后续需要实时盯盘时再启用。飞书机器人凭证由页面扫码接入流程创建，并保存在 `LOF_NOTICE_DIR` 的状态文件里；模板见 `deploy/systemd/lof-notice.env.example`。
+`fund-estimator-lof-daily-notice.timer` 仅作为不用 Web 内置调度器时的备用方案。`fund-estimator-lof-worker.timer` 是每分钟扫描/即时通知方案，后续需要实时盯盘时再启用。飞书机器人凭证由页面扫码接入流程创建，并保存在 `LOF_NOTICE_DIR` 的状态文件里；模板见 `deploy/systemd/lof-notice.env.example`。
 
 飞书接入流程：
 
@@ -236,14 +238,11 @@ sudo chown -R fundestimator:fundestimator /opt/fund-estimator /var/lib/fund-esti
 python3.12 -m venv /opt/fund-estimator/.venv
 /opt/fund-estimator/.venv/bin/pip install -r requirements.txt
 sudo cp deploy/systemd/fund-estimator.service /etc/systemd/system/
-sudo cp deploy/systemd/fund-estimator-lof-daily-notice.service /etc/systemd/system/
-sudo cp deploy/systemd/fund-estimator-lof-daily-notice.timer /etc/systemd/system/
 sudo install -d -m 0750 /etc/fund-estimator
 sudo cp deploy/systemd/lof-notice.env.example /etc/fund-estimator/lof-notice.env
 sudo editor /etc/fund-estimator/lof-notice.env
 sudo systemctl daemon-reload
 sudo systemctl enable --now fund-estimator
-sudo systemctl enable --now fund-estimator-lof-daily-notice.timer
 ```
 
 Nginx 反代示例在 `deploy/nginx/fund-estimator.conf`。生产环境建议配 HTTPS；如果只在家庭局域网测试，可以直接用 `http://服务器IP:8000` 在手机浏览器打开。

@@ -52,6 +52,7 @@ from fund_estimator.services.estimator import FundEstimatorService
 from fund_estimator.services.exceptions import AppError
 from fund_estimator.services.etf import EastmoneyEtfMarketDataSource, EtfMonitorService
 from fund_estimator.services.lof import EastmoneyLofMarketDataSource, LofMonitorService
+from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
 from fund_estimator.services.lof_notifications import LofNoticeService
 from fund_estimator.services.watchlist import WatchlistService
 from fund_estimator.models.lof import (
@@ -92,6 +93,11 @@ def get_runtime_config() -> dict[str, object]:
         "mode": "mock" if force_mock else "real",
         "background_scan_enabled": os.getenv("FUND_ESTIMATOR_BACKGROUND_SCAN", "0") == "1",
         "background_scan_interval_seconds": int(os.getenv("FUND_ESTIMATOR_SCAN_INTERVAL_SECONDS", "60")),
+        "lof_notice_scheduler_enabled": os.getenv(
+            "FUND_ESTIMATOR_LOF_NOTICE_SCHEDULER",
+            "0" if force_mock else "1",
+        )
+        == "1",
     }
 
 
@@ -177,6 +183,7 @@ def create_app() -> FastAPI:
     comparison = FundComparisonService(estimator)
     lof_notice = LofNoticeService()
     lof_monitor = create_lof_monitor_service(estimator, notice_service=lof_notice)
+    lof_notice_scheduler = LofDailyNoticeScheduler(monitor=lof_monitor, notice=lof_notice)
     etf_monitor = create_etf_monitor_service(estimator)
     runtime_config = get_runtime_config()
 
@@ -199,15 +206,20 @@ def create_app() -> FastAPI:
     async def start_background_scan() -> None:
         if bool(runtime_config["background_scan_enabled"]):
             app.state.background_scan_task = asyncio.create_task(background_scan_loop())
+        if bool(runtime_config["lof_notice_scheduler_enabled"]):
+            lof_notice_scheduler.start()
+            app.state.lof_notice_scheduler = lof_notice_scheduler
 
     @app.on_event("shutdown")
     async def stop_background_scan() -> None:
         task = getattr(app.state, "background_scan_task", None)
-        if task is None:
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        scheduler = getattr(app.state, "lof_notice_scheduler", None)
+        if scheduler is not None:
+            await scheduler.stop()
 
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
@@ -388,11 +400,13 @@ def create_app() -> FastAPI:
 
     @app.put("/api/lof/notice/settings", response_model=LofNoticeStatus)
     async def lof_notice_settings(request: LofNoticeSettingsUpdate) -> LofNoticeStatus:
-        return lof_notice.update_settings(
+        status = lof_notice.update_settings(
             enabled=request.enabled,
             daily_summary_time=request.daily_summary_time,
             ipo_reminder_enabled=request.ipo_reminder_enabled,
         )
+        lof_notice_scheduler.wake()
+        return status
 
     @app.post("/api/lof/notice/feishu/connect", response_model=LofFeishuConnectResponse)
     async def lof_notice_feishu_connect(request: Request) -> LofFeishuConnectResponse:

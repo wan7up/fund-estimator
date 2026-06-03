@@ -10,6 +10,7 @@ from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
 from fund_estimator.services.lof import EastmoneyLofTradingStatusDataSource, LofMonitorService
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
+from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
 from fund_estimator.services.lof_notifications import LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
 
 
@@ -115,6 +116,16 @@ class DummyNewIssueSource:
     async def get_calendar(self, target_date: date) -> NewIssueCalendar:
         self.calls.append(target_date)
         return self.calendar
+
+
+class DummyNoticeMonitor:
+    def __init__(self, response: LofOpportunityResponse) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+
+    async def get_opportunities(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return self.response
 
 
 def make_service(tmp_path) -> LofMonitorService:
@@ -495,6 +506,73 @@ def test_daily_summary_schedule_skips_after_same_day_send(tmp_path):
     config.state_path.write_text(json.dumps(state), encoding="utf-8")
 
     assert notice.should_run_daily_summary(datetime(2026, 6, 3, 2, 30, tzinfo=UTC)) is False
+
+
+def test_lof_notice_scheduler_uses_configured_daily_time(tmp_path):
+    config = LofNoticeConfig(
+        app_id="app",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    scheduler = LofDailyNoticeScheduler(monitor=object(), notice=notice)
+
+    before = scheduler.seconds_until_next_run(datetime(2026, 6, 3, 1, 55, tzinfo=UTC))
+    due = scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 0, tzinfo=UTC))
+    state = {
+        "settings": {"daily_summary_time": "10:00"},
+        "last_daily_summary_date": "2026-06-03",
+    }
+    config.state_path.write_text(json.dumps(state), encoding="utf-8")
+    after_sent = scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 5, tzinfo=UTC))
+
+    assert before == 300
+    assert due == 0
+    assert after_sent > 23 * 60 * 60
+
+
+def test_lof_notice_scheduler_sends_new_issue_after_daily_summary(tmp_path):
+    now = datetime(2026, 6, 3, 2, 0, tzinfo=UTC)
+    response = LofOpportunityResponse(
+        scanned_at=now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=[],
+    )
+    monitor = DummyNoticeMonitor(response)
+    source = DummyNewIssueSource(
+        NewIssueCalendar(
+            target_date=date(2026, 6, 3),
+            stocks=[NewIssueItem(kind="stock", code="920126", name="永大股份", apply_code="920126")],
+            bonds=[],
+        )
+    )
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        ipo_reminder_enabled=True,
+    )
+    notice = LofNoticeService(config, new_issue_source=source)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice)
+
+    result = __import__("asyncio").run(scheduler.run_once(now=now))
+
+    assert result["notice"]["status"] == "sent"
+    assert result["new_issue_notice"]["status"] == "sent"
+    assert len(sent_texts) == 2
+    assert sent_texts[0].startswith("【LOF套利机会提醒】")
+    assert sent_texts[1].startswith("【打新提醒】")
+    assert source.calls == [date(2026, 6, 3)]
+    assert monitor.calls and monitor.calls[0]["refresh"] is True
 
 
 def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
