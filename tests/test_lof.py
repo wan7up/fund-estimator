@@ -4,7 +4,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 
 from fund_estimator.data_sources.sina import parse_sina_lof_quotes
-from fund_estimator.models.lof import LofMarketQuote, LofTradingStatus
+from fund_estimator.models.lof import LofMarketQuote, LofOpportunityResponse, LofPremiumItem, LofTradingStatus
 from fund_estimator.models.schema import FundProfile, FundSearchResult
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
@@ -370,6 +370,66 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert state["last_daily_summary_date"] == "2026-05-29"
 
 
+def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        send_empty_daily_summary=False,
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 3, 2, 4, tzinfo=UTC)
+
+    def item(code: str, premium: float, turnover: float, purchase_status: str = "开放") -> LofPremiumItem:
+        return LofPremiumItem(
+            code=code,
+            name=f"测试LOF{code}",
+            estimated_premium_pct=premium,
+            official_premium_pct=premium,
+            exchange_turnover_yuan=turnover,
+            purchase_status=purchase_status,
+            redemption_status="开放",
+            daily_purchase_limit_yuan=10_000,
+            direction="neutral",
+            level="none",
+            updated_at=now,
+        )
+
+    response = LofOpportunityResponse(
+        scanned_at=now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=[
+            item("160001", 1.2, 5_000_000),
+            item("160002", 2.5, 8_000_000),
+            item("160003", 3.0, 9_000_000, "暂停"),
+            item("160004", 4.0, 100_000),
+            item("160005", 0.9, 10_000_000),
+        ],
+    )
+
+    result = notice.notify_daily_summary(response, now=now)
+
+    assert result["status"] == "sent"
+    assert len(sent_texts) == 1
+    assert "160002 测试LOF160002" in sent_texts[0]
+    assert "160001 测试LOF160001" in sent_texts[0]
+    assert "\n\n160001 测试LOF160001" in sent_texts[0]
+    assert "160003" not in sent_texts[0]
+    assert "160004" not in sent_texts[0]
+    assert "160005" not in sent_texts[0]
+    assert "成交额：800万；估算溢价：+2.50%" in sent_texts[0]
+    assert "操作建议：溢价超过1%，成交额达标；优先确认申购开放、限额和费率，再评估申购转场内卖出。" in sent_texts[0]
+
+
 def test_lof_notice_test_uses_alert_template(tmp_path):
     service = make_service(tmp_path)
     item = __import__("asyncio").run(service.get_item("501312"))
@@ -392,7 +452,7 @@ def test_lof_notice_test_uses_alert_template(tmp_path):
             [
                 "【LOF套利机会提醒】2026-06-03 10:04",
                 "501312 核心LOF501312",
-                "操作建议：当前未满足可操作条件，建议仅观察，不做套利动作。",
+                "操作建议：当前溢价未超过提醒阈值，建议仅观察。",
                 "成交额：10万；估算溢价：+0.00%",
                 "官方净值溢价：+1.00%；申购限额1万",
             ]

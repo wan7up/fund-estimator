@@ -19,8 +19,8 @@ TRUTHY = {"1", "true", "yes", "on", "enabled"}
 MARKET_TZ = ZoneInfo("Asia/Shanghai")
 COOLDOWN_SECONDS = 30 * 60
 SUMMARY_INTERVAL_SECONDS = 10 * 60
-INSTANT_PREMIUM_THRESHOLD_PCT = 3.0
-INSTANT_DISCOUNT_THRESHOLD_PCT = -5.0
+NOTICE_PREMIUM_THRESHOLD_PCT = 1.0
+DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
 CONNECT_STATE_TTL_SECONDS = 10 * 60
 FEISHU_ACCOUNTS_BASE = "https://accounts.feishu.cn"
@@ -375,12 +375,13 @@ class LofNoticeService:
             self._write_state(state, result, now=now)
             return result
         rows: list[dict[str, Any]] = []
-        for item in response.items:
-            if self._is_instant_candidate(item):
-                row = self._send_candidate(item, state=state, now=now, reason="instant")
+        notice_items = self._notice_candidates(response)
+        for item in notice_items:
+            if self._is_instant_candidate(item, min_turnover_yuan=response.min_turnover_yuan):
+                row = self._send_candidate(item, state=state, now=now, reason="instant", min_turnover_yuan=response.min_turnover_yuan)
                 if row is not None:
                     rows.append(row)
-        if self._should_send_summary(state, now) and any(item.actionable for item in response.items):
+        if self._should_send_summary(state, now) and notice_items:
             row = self._send_summary(response, state=state, now=now)
             if row is not None:
                 rows.append(row)
@@ -422,7 +423,7 @@ class LofNoticeService:
             self._write_state(state, result, now=now)
             return result
         send_empty = self.config.send_empty_daily_summary if send_empty is None else send_empty
-        items = [item for item in response.items if item.actionable]
+        items = self._notice_candidates(response)
         if not items and not send_empty:
             result = self._state_result("no_actionable_opportunities", now=now, last_error=None, rows=[])
             state["last_daily_summary_date"] = today
@@ -462,30 +463,67 @@ class LofNoticeService:
 
     @staticmethod
     def _cooldown_key(item: LofPremiumItem) -> str:
-        return f"{item.code}:{item.direction}:{item.level}"
+        premium = LofNoticeService._notice_premium_pct(item)
+        direction = "premium" if premium is not None and premium > 0 else item.direction
+        level = "gt_1pct" if premium is not None and premium > NOTICE_PREMIUM_THRESHOLD_PCT else item.level
+        return f"{item.code}:{direction}:{level}"
 
-    def _is_instant_candidate(self, item: LofPremiumItem) -> bool:
-        if not item.actionable:
-            return False
-        premium = item.estimated_premium_pct
-        if premium is None:
-            return False
-        return premium >= INSTANT_PREMIUM_THRESHOLD_PCT or premium <= INSTANT_DISCOUNT_THRESHOLD_PCT
+    @classmethod
+    def _notice_candidates(cls, response: LofOpportunityResponse) -> list[LofPremiumItem]:
+        items = [
+            item
+            for item in response.items
+            if cls._is_notice_candidate(item, min_turnover_yuan=response.min_turnover_yuan)
+        ]
+        return sorted(items, key=cls._notice_sort_key)
 
-    def _send_candidate(self, item: LofPremiumItem, *, state: dict[str, Any], now: datetime, reason: str) -> dict[str, Any] | None:
+    @classmethod
+    def _is_instant_candidate(cls, item: LofPremiumItem, *, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> bool:
+        return cls._is_notice_candidate(item, min_turnover_yuan=min_turnover_yuan)
+
+    @staticmethod
+    def _is_notice_candidate(item: LofPremiumItem, *, min_turnover_yuan: float) -> bool:
+        premium = LofNoticeService._notice_premium_pct(item)
+        if premium is None or premium <= NOTICE_PREMIUM_THRESHOLD_PCT:
+            return False
+        if item.purchase_status == "暂停":
+            return False
+        if item.exchange_turnover_yuan is None or item.exchange_turnover_yuan < min_turnover_yuan:
+            return False
+        return True
+
+    @staticmethod
+    def _notice_premium_pct(item: LofPremiumItem) -> float | None:
+        return item.estimated_premium_pct if item.estimated_premium_pct is not None else item.official_premium_pct
+
+    @staticmethod
+    def _notice_sort_key(item: LofPremiumItem) -> tuple[float, float, str]:
+        premium = LofNoticeService._notice_premium_pct(item)
+        return (-(premium if premium is not None else -999), -(item.exchange_turnover_yuan or 0), item.code)
+
+    def _send_candidate(
+        self,
+        item: LofPremiumItem,
+        *,
+        state: dict[str, Any],
+        now: datetime,
+        reason: str,
+        min_turnover_yuan: float,
+    ) -> dict[str, Any] | None:
         key = self._cooldown_key(item)
         cooldowns = state.setdefault("cooldowns", {})
         expires_at = self._parse_time(cooldowns.get(key))
         if expires_at is not None and expires_at > now:
             return None
-        text = self._format_candidate(item, reason=reason)
+        text = self._format_candidate(item, reason=reason, min_turnover_yuan=min_turnover_yuan)
+        premium = self._notice_premium_pct(item)
         row = {
             "created_at": now.isoformat(timespec="seconds"),
             "kind": reason,
             "code": item.code,
             "name": item.name,
-            "direction": item.direction,
-            "level": item.level,
+            "direction": "premium" if premium is not None and premium > 0 else item.direction,
+            "level": "gt_1pct" if premium is not None and premium > NOTICE_PREMIUM_THRESHOLD_PCT else item.level,
             "estimated_premium_pct": item.estimated_premium_pct,
             "official_premium_pct": item.official_premium_pct,
             **self._send_feishu_openapi(text, state=state),
@@ -495,7 +533,7 @@ class LofNoticeService:
         return row
 
     def _send_summary(self, response: LofOpportunityResponse, *, state: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-        items = [item for item in response.items if item.actionable][:8]
+        items = self._notice_candidates(response)[:8]
         if not items:
             return None
         text = self._format_summary(items, response=response)
@@ -521,12 +559,12 @@ class LofNoticeService:
         return last_summary is None or (now - last_summary).total_seconds() >= SUMMARY_INTERVAL_SECONDS
 
     @staticmethod
-    def _format_candidate(item: LofPremiumItem, *, reason: str) -> str:
-        return LofNoticeService._format_alert([item], now=datetime.now(UTC))
+    def _format_candidate(item: LofPremiumItem, *, reason: str, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> str:
+        return LofNoticeService._format_alert([item], now=datetime.now(UTC), min_turnover_yuan=min_turnover_yuan)
 
     @staticmethod
     def _format_summary(items: list[LofPremiumItem], *, response: LofOpportunityResponse) -> str:
-        return LofNoticeService._format_alert(items, now=response.scanned_at)
+        return LofNoticeService._format_alert(items, now=response.scanned_at, min_turnover_yuan=response.min_turnover_yuan)
 
     @staticmethod
     def _format_daily_summary(items: list[LofPremiumItem], *, response: LofOpportunityResponse, now: datetime) -> str:
@@ -537,13 +575,18 @@ class LofNoticeService:
                     f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
                     "当前暂无可操作套利机会。",
                     f"扫描池：{len(response.items)}只",
-                    "主要过滤条件：估算溢价达到阈值、成交额充足、申购/赎回未卡住、代理行情可用。",
+                    f"主要过滤条件：溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%、申购未暂停、成交额达到{LofNoticeService._format_money(response.min_turnover_yuan)}。",
                 ]
             )
-        return LofNoticeService._format_alert(items[:10], now=now)
+        return LofNoticeService._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
 
     @staticmethod
-    def _format_alert(items: list[LofPremiumItem], *, now: datetime) -> str:
+    def _format_alert(
+        items: list[LofPremiumItem],
+        *,
+        now: datetime,
+        min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN,
+    ) -> str:
         local_now = now.astimezone(MARKET_TZ)
         lines = [f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}"]
         for index, item in enumerate(items):
@@ -552,7 +595,7 @@ class LofNoticeService:
             lines.extend(
                 [
                     f"{item.code} {item.name}",
-                    f"操作建议：{LofNoticeService._action_advice(item)}",
+                    f"操作建议：{LofNoticeService._action_advice(item, min_turnover_yuan=min_turnover_yuan)}",
                     f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
                     f"官方净值溢价：{LofNoticeService._format_pct(item.official_premium_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
                 ]
@@ -573,18 +616,21 @@ class LofNoticeService:
         )
 
     @staticmethod
-    def _action_advice(item: LofPremiumItem) -> str:
-        if not item.actionable:
-            return "当前未满足可操作条件，建议仅观察，不做套利动作。"
-        if item.direction == "premium":
-            if item.purchase_status == "暂停":
-                return "溢价但申购暂停，建议仅观察。"
-            return "溢价方向，优先确认申购开放、限额和成交额，再评估申购转场内卖出。"
-        if item.direction == "discount":
-            if item.redemption_status == "暂停":
-                return "折价但赎回暂停，建议仅观察。"
-            return "折价方向，优先确认赎回开放和成交额，再评估场内买入并赎回。"
-        return "信号方向不明确，建议仅观察。"
+    def _action_advice(item: LofPremiumItem, *, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> str:
+        premium = LofNoticeService._notice_premium_pct(item)
+        if premium is None or premium <= NOTICE_PREMIUM_THRESHOLD_PCT:
+            return "当前溢价未超过提醒阈值，建议仅观察。"
+        if item.purchase_status == "暂停":
+            return "溢价超过1%，但申购暂停，暂不具备申购套利条件。"
+        if item.exchange_turnover_yuan is None:
+            return "溢价超过1%，但成交额未知，先核实流动性和申购状态。"
+        if item.exchange_turnover_yuan < min_turnover_yuan:
+            return f"溢价超过1%，但成交额低于{LofNoticeService._format_money(min_turnover_yuan)}，建议仅观察或小额验证。"
+        if item.purchase_status == "unknown":
+            return "溢价超过1%，成交额达标；申购状态未确认，先核实开放和限额。"
+        if item.purchase_status == "限制大额":
+            return "溢价超过1%，成交额达标；申购限额受限，先确认额度再评估申购转场内卖出。"
+        return "溢价超过1%，成交额达标；优先确认申购开放、限额和费率，再评估申购转场内卖出。"
 
     @staticmethod
     def _format_pct(value: float | None) -> str:
