@@ -615,11 +615,6 @@ class LofNoticeService:
             result = self._state_result("skipped_duplicate_ipo_reminder", now=now, last_error=None, rows=[])
             self._write_state(state, result, now=now)
             return result
-        reminder_time = self._ipo_reminder_time(self.effective_daily_summary_time(state))
-        if not force and local.time() < reminder_time:
-            result = self._state_result("skipped_before_ipo_reminder_time", now=now, last_error=None, rows=[])
-            self._write_state(state, result, now=now)
-            return result
         try:
             calendar = await self.new_issue_source.get_calendar(local.date())
         except httpx.HTTPError as exc:
@@ -922,11 +917,6 @@ class LofNoticeService:
 
     def _is_after_daily_summary_time(self, local_now: datetime, summary_time: str | None = None) -> bool:
         return local_now.time() >= self._parse_hhmm(summary_time or self.effective_daily_summary_time())
-
-    @staticmethod
-    def _ipo_reminder_time(summary_time: str) -> time:
-        base = datetime.combine(date(2000, 1, 2), LofNoticeService._parse_hhmm(summary_time))
-        return (base - timedelta(minutes=15)).time()
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:

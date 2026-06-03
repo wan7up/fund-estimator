@@ -497,7 +497,7 @@ def test_daily_summary_schedule_skips_after_same_day_send(tmp_path):
     assert notice.should_run_daily_summary(datetime(2026, 6, 3, 2, 30, tzinfo=UTC)) is False
 
 
-def test_new_issue_reminder_sends_15_minutes_before_notice_time(tmp_path):
+def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
     calendar = NewIssueCalendar(
         target_date=date(2026, 6, 3),
         stocks=[
@@ -537,18 +537,16 @@ def test_new_issue_reminder_sends_15_minutes_before_notice_time(tmp_path):
     sent_texts: list[str] = []
     notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
 
-    before = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 44, tzinfo=UTC)))
-    first = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 45, tzinfo=UTC)))
-    second = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 50, tzinfo=UTC)))
+    first = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 2, 0, tzinfo=UTC)))
+    second = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 2, 5, tzinfo=UTC)))
 
-    assert before["status"] == "skipped_before_ipo_reminder_time"
     assert first["status"] == "sent"
     assert second["status"] == "skipped_duplicate_ipo_reminder"
     assert source.calls == [date(2026, 6, 3)]
     assert sent_texts == [
         "\n".join(
             [
-                "【打新提醒】2026-06-03 09:45",
+                "【打新提醒】2026-06-03 10:00",
                 "今日可打新：新股 1 只，新债 1 只",
                 "",
                 "新股：",

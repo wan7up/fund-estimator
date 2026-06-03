@@ -31,9 +31,8 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
     estimator = create_estimator_service()
     notice = LofNoticeService()
     now = datetime.now(UTC)
-    new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
     if not args.force and not notice.should_run_daily_summary(now):
-        return {"new_issue_notice": new_issue_notice}
+        return {"notice": {"status": "skipped_daily_summary_schedule"}}
     monitor = create_lof_monitor_service(estimator, notice_service=notice)
     response = await monitor.get_opportunities(
         normal_threshold_pct=args.normal_threshold_pct,
@@ -47,6 +46,7 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
         force=args.force,
         send_empty=not args.no_empty,
     )
+    new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
     return {"scan": response.model_dump(mode="json"), "notice": notice_result, "new_issue_notice": new_issue_notice}
 
 
