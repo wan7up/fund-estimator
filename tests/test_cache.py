@@ -33,3 +33,19 @@ def test_watchlist_schema_migration_keeps_legacy_default_rows(tmp_path):
     cache.delete_watchlist("001438", "phone-a")
     assert cache.list_watchlist("phone-a") == []
     assert [row["code"] for row in cache.list_watchlist()] == ["001438"]
+
+
+def test_watchlist_add_inserts_at_top_and_existing_moves_to_top(tmp_path):
+    cache = SQLiteCache(tmp_path / "watchlist_top.sqlite3")
+
+    cache.add_watchlist("000001", "first", "phone-a")
+    cache.add_watchlist("001438", "second", "phone-a")
+    cache.add_watchlist("001433", "third", "phone-a")
+
+    assert [row["code"] for row in cache.list_watchlist("phone-a")] == ["001433", "001438", "000001"]
+
+    cache.add_watchlist("000001", "first renamed", "phone-a")
+    rows = cache.list_watchlist("phone-a")
+
+    assert [row["code"] for row in rows] == ["000001", "001433", "001438"]
+    assert rows[0]["name"] == "first renamed"

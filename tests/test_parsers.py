@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fund_estimator.data_sources.eastmoney import (
     _is_notfound_redirect,
@@ -39,7 +40,7 @@ def test_notfound_redirect_is_detected():
 
 
 def test_parse_pingzhong_profile():
-    ts = int(datetime(2026, 5, 25).timestamp() * 1000)
+    ts = int(datetime(2026, 5, 25, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp() * 1000)
     text = f'''
     var fS_name = "易方达瑞享混合E";
     var Data_netWorthTrend = [
@@ -83,6 +84,27 @@ def test_parse_pingzhong_profile():
     assert profile.details.managers[0].name == "示例经理"
     assert profile.details.similar_rank.rank == 12
     assert profile.details.similar_rank.percentile_pct == 99.63
+
+
+def test_parse_pingzhong_profile_uses_china_timezone_for_dates():
+    latest_ts = int(datetime(2026, 6, 2, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp() * 1000)
+    previous_ts = int(datetime(2026, 6, 1, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp() * 1000)
+    text = f'''
+    var fS_name = "timezone fund";
+    var Data_netWorthTrend = [
+      {{"x": {previous_ts}, "y": 9.2986, "equityReturn": -5.21, "unitMoney": ""}},
+      {{"x": {latest_ts}, "y": 9.9238, "equityReturn": 6.72, "unitMoney": ""}}
+    ];
+    var Data_ACWorthTrend = [[{latest_ts}, 9.9238]];
+    var Data_rateInSimilarType = [{{"x": {latest_ts}, "y": 20, "sc": "2319"}}];
+    var Data_rateInSimilarPersent = [[{latest_ts}, 99.14]];
+    '''
+
+    profile = parse_pingzhong_profile("001438", text)
+
+    assert profile.nav_date.isoformat() == "2026-06-02"
+    assert profile.previous_nav_date and profile.previous_nav_date.isoformat() == "2026-06-01"
+    assert profile.details.similar_rank.rank_date and profile.details.similar_rank.rank_date.isoformat() == "2026-06-02"
 
 
 def test_parse_holdings_response_from_html():

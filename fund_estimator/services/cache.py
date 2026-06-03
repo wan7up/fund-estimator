@@ -215,18 +215,19 @@ class SQLiteCache:
         with self._connect() as conn:
             self._ensure_watchlist_device(conn, device_id)
             conn.execute(
+                "UPDATE watchlist SET sort_order = sort_order + 1 WHERE device_id = ?",
+                (device_id,),
+            )
+            conn.execute(
                 """
                 INSERT INTO watchlist (device_id, code, name, added_at, sort_order)
-                VALUES (
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    COALESCE((SELECT MAX(sort_order) + 1 FROM watchlist WHERE device_id = ?), 0)
-                )
-                ON CONFLICT(device_id, code) DO UPDATE SET name = COALESCE(excluded.name, watchlist.name)
+                VALUES (?, ?, ?, ?, 0)
+                ON CONFLICT(device_id, code) DO UPDATE SET
+                    name = COALESCE(excluded.name, watchlist.name),
+                    added_at = excluded.added_at,
+                    sort_order = 0
                 """,
-                (device_id, code, name, datetime.now(UTC).isoformat(), device_id),
+                (device_id, code, name, datetime.now(UTC).isoformat()),
             )
 
     def delete_watchlist(self, code: str, device_id: str = "default") -> bool:

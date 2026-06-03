@@ -11,6 +11,7 @@ from datetime import date, datetime
 from html import unescape
 from typing import Any
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import httpx
 from lxml import html
@@ -36,6 +37,7 @@ DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 fund-estimator/0.1",
     "Referer": "https://fund.eastmoney.com/",
 }
+CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _decode_utf8_response(response: httpx.Response) -> str:
@@ -91,7 +93,7 @@ def _extract_float_var(text: str, var_name: str) -> float | None:
 
 def _date_from_ms(value: Any) -> date | None:
     try:
-        return datetime.fromtimestamp(int(value) / 1000).date()
+        return datetime.fromtimestamp(int(value) / 1000, CHINA_TZ).date()
     except (TypeError, ValueError, OSError):
         return None
 
@@ -129,7 +131,7 @@ def parse_pingzhong_profile(code: str, text: str, fund_type: str | None = None) 
 
     latest = trend[-1]
     ts = int(latest["x"]) / 1000
-    nav_date = datetime.fromtimestamp(ts).date()
+    nav_date = datetime.fromtimestamp(ts, CHINA_TZ).date()
     last_nav = float(latest["y"])
     previous_nav: float | None = None
     previous_nav_date: date | None = None
@@ -137,7 +139,7 @@ def parse_pingzhong_profile(code: str, text: str, fund_type: str | None = None) 
     if len(trend) >= 2:
         previous = trend[-2]
         previous_nav = float(previous["y"])
-        previous_nav_date = datetime.fromtimestamp(int(previous["x"]) / 1000).date()
+        previous_nav_date = datetime.fromtimestamp(int(previous["x"]) / 1000, CHINA_TZ).date()
 
     accumulated_nav: float | None = None
     if ac_trend:
