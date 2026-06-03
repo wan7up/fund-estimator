@@ -38,7 +38,7 @@ class FakeAiClient:
         self.posts.append(json)
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": "总体判断\n这是一段 AI 评价。"}}]},
+            json={"choices": [{"message": {"content": "结论：候选基金短评。"}}]},
             request=httpx.Request("POST", url),
         )
 
@@ -113,8 +113,10 @@ def test_models_and_commentary_use_saved_config(tmp_path):
 
     assert models.models == ["gpt-test", "gpt-test-mini"]
     assert commentary.model == "gpt-test"
-    assert "AI 评价" in commentary.commentary
+    assert "候选基金短评" in commentary.commentary
     assert FakeAiClient.posts[0]["model"] == "gpt-test"
+    assert FakeAiClient.posts[0]["temperature"] == 0.25
+    assert FakeAiClient.posts[0]["max_tokens"] == 700
 
 
 def test_prompt_preserves_rule_boundaries(tmp_path):
@@ -133,3 +135,6 @@ def test_prompt_preserves_rule_boundaries(tmp_path):
     assert "不改变排序" in prompt
     assert "not_comparable" in prompt
     assert "不要给出谁更好的强推荐" in prompt
+    assert "候选基金研究员" in prompt
+    assert "固定输出 3-4 行纯文本" in prompt
+    assert "不要写泛泛的基金投资科普" in prompt

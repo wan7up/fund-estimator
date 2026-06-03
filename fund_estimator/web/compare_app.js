@@ -407,12 +407,13 @@ function renderAiPanel() {
       els.aiConfigSummary.hidden = false;
       renderAiConfigSummary(status);
     }
+    els.aiConfig.hidden = false;
+    els.aiModelFields.hidden = false;
     if (status.configured && !state.ai.editingConfig) {
+      els.aiApiFields.hidden = true;
       els.aiStatusText.textContent = `${status.selected_model || "AI"} · 已配置`;
     } else {
-      els.aiConfig.hidden = false;
       els.aiApiFields.hidden = hasApi && !state.ai.editingConfig;
-      els.aiModelFields.hidden = false;
       els.aiStatusText.textContent = !hasApi ? "待保存 API" : status.configured ? "修改API设置" : "待选择模型";
     }
   }

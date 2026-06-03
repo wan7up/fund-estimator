@@ -210,7 +210,7 @@ def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
 
             return httpx.Response(
                 200,
-                json={"choices": [{"message": {"content": "总体判断\nAI 已按规则评价。"}}]},
+                json={"choices": [{"message": {"content": "结论：候选基金短评。"}}]},
                 request=httpx.Request("POST", url),
             )
 
@@ -247,7 +247,7 @@ def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
     assert configured.json()["configured"] is True
     assert commentary.status_code == 200
     assert commentary.json()["model"] == "gpt-test-mini"
-    assert "AI 已按规则评价" in commentary.json()["commentary"]
+    assert "候选基金短评" in commentary.json()["commentary"]
 
 
 def test_lof_monitor_refresh_and_cache_fallback(tmp_path, monkeypatch):

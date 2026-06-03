@@ -183,8 +183,8 @@ class CompareAiService:
         payload = {
             "model": config.selected_model,
             "messages": messages,
-            "temperature": 0.35,
-            "max_tokens": 1800,
+            "temperature": 0.25,
+            "max_tokens": 700,
         }
         try:
             async with self.client_factory(
@@ -220,21 +220,26 @@ class CompareAiService:
             persona_prompt = config.custom_persona
         compare_json = json.dumps(request.compare_result.model_dump(mode="json"), ensure_ascii=False)
         system = (
-            "你是基金对比工具的可选解释层，只负责把已有规则结果解释得更清楚。"
+            "你是基金对比页内置的候选基金研究员，不是聊天助手。"
+            "你的任务是在页面里给出短评，只针对用户当前候选基金说话。"
             "你必须遵守：不重新打分、不改变排序、不改变 recommendation_code、不编造未提供的数据、"
             "不承诺收益、不把结论写成投资建议。"
-            f"分析风格参考：{persona_prompt}"
+            "写作方式：中文，简短、克制、像研究备注；不要寒暄，不要说“以下是”，不要提 JSON、模型或 AI，"
+            "不要输出 Markdown 表格或长标题。"
+            f"风格偏好只作为侧重点参考：{persona_prompt}"
         )
         user = (
-            "请基于下面 CompareResponse JSON 输出中文评价，使用固定小标题：\n"
-            "1. 总体判断\n"
-            "2. 相似/不可比关系\n"
-            "3. 每只基金风格\n"
-            "4. 不同投资偏好下怎么选\n"
-            "5. 风险和数据缺失提示\n\n"
-            "要求：如果 conclusion 是 not_comparable，不要给出谁更好的强推荐；"
+            "请基于下面 CompareResponse JSON 输出页面短评。\n"
+            "固定输出 3-4 行纯文本，每行不超过 45 个中文字符，总字数控制在 120-220 字。\n"
+            "推荐格式：\n"
+            "结论：一句话说明可比性和规则结论。\n"
+            "风格：点名候选基金，概括每只或每组的风格差异。\n"
+            "选择：只按已给评分/排序/推荐代码说明适合什么偏好。\n"
+            "注意：只写最关键的风险、不可比原因或数据缺失。\n\n"
+            "要求：如果 conclusion 是 not_comparable，不要给出谁更好的强推荐，选择行只说明不能直接排序；"
             "如果 conclusion 是 very_similar，可以解释规则推荐的基金为什么更优；"
-            "如果存在多只基金，只说明哪几只相似、哪几只相关性低。\n\n"
+            "如果存在多只基金，只说明哪几只相似、哪几只相关性低。"
+            "不要复述评分表，不要写泛泛的基金投资科普。\n\n"
             f"CompareResponse JSON：\n{compare_json}"
         )
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
