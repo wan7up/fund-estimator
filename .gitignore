@@ -6,6 +6,7 @@ venv/
 .local_python/
 .chrome-*/
 data/
+deploy/certs/
 dist/
 *.sqlite3
 *.db

@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew fund tools Let's Encrypt certificate
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/fund-estimator/deploy/certbot-renew.sh

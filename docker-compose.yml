@@ -3,8 +3,8 @@ services:
     build: .
     container_name: fund-tools
     restart: unless-stopped
-    ports:
-      - "18367:8000"
+    expose:
+      - "8000"
     environment:
       FUND_ESTIMATOR_FORCE_MOCK: "0"
       FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK: "0"
@@ -12,3 +12,15 @@ services:
       FUND_ESTIMATOR_BACKGROUND_SCAN: "0"
     volumes:
       - ./data:/app/data
+
+  fund-tools-proxy:
+    image: nginx:1.27-alpine
+    container_name: fund-tools-proxy
+    restart: unless-stopped
+    depends_on:
+      - fund-tools
+    ports:
+      - "18367:8443"
+    volumes:
+      - ./deploy/nginx/fund-tools.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/certs/letsencrypt:/etc/letsencrypt:ro
