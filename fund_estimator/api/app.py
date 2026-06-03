@@ -391,6 +391,7 @@ def create_app() -> FastAPI:
         return lof_notice.update_settings(
             enabled=request.enabled,
             daily_summary_time=request.daily_summary_time,
+            ipo_reminder_enabled=request.ipo_reminder_enabled,
         )
 
     @app.post("/api/lof/notice/feishu/connect", response_model=LofFeishuConnectResponse)

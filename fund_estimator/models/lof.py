@@ -106,7 +106,9 @@ class LofNoticeStatus(BaseModel):
     last_status: str | None = None
     last_error: str | None = None
     daily_summary_time: str | None = None
+    ipo_reminder_enabled: bool = False
     last_daily_summary_date: str | None = None
+    last_ipo_reminder_date: str | None = None
     cooldown_count: int = 0
     state_path: str
     ledger_path: str
@@ -115,6 +117,7 @@ class LofNoticeStatus(BaseModel):
 class LofNoticeSettingsUpdate(BaseModel):
     enabled: bool | None = None
     daily_summary_time: str | None = None
+    ipo_reminder_enabled: bool | None = None
 
 
 class LofFeishuConnectResponse(BaseModel):

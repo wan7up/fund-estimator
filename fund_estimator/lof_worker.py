@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from fund_estimator.api.app import create_estimator_service, create_lof_monitor_service
@@ -29,6 +30,10 @@ async def scan_command(args: argparse.Namespace) -> dict[str, Any]:
 async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
     estimator = create_estimator_service()
     notice = LofNoticeService()
+    now = datetime.now(UTC)
+    new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
+    if not args.force and not notice.should_run_daily_summary(now):
+        return {"new_issue_notice": new_issue_notice}
     monitor = create_lof_monitor_service(estimator, notice_service=notice)
     response = await monitor.get_opportunities(
         normal_threshold_pct=args.normal_threshold_pct,
@@ -42,7 +47,7 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
         force=args.force,
         send_empty=not args.no_empty,
     )
-    return {"scan": response.model_dump(mode="json"), "notice": notice_result}
+    return {"scan": response.model_dump(mode="json"), "notice": notice_result, "new_issue_notice": new_issue_notice}
 
 
 async def send_test_command(_: argparse.Namespace) -> dict[str, Any]:
@@ -70,6 +75,7 @@ def main() -> None:
     daily.add_argument("--min-turnover-yuan", type=float, default=3_000_000)
     daily.add_argument("--limit", type=int, default=120)
     daily.add_argument("--force", action="store_true")
+    daily.add_argument("--force-new-issue", action="store_true")
     daily.add_argument("--no-empty", action="store_true", help="do not send a message when there are no actionable items")
 
     subparsers.add_parser("send-test")

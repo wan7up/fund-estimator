@@ -203,18 +203,20 @@ def test_lof_notice_settings_api_persists_page_settings(tmp_path, monkeypatch):
 
     update_response = client.put(
         "/api/lof/notice/settings",
-        json={"enabled": False, "daily_summary_time": "10:30"},
+        json={"enabled": False, "daily_summary_time": "10:30", "ipo_reminder_enabled": True},
     )
     assert update_response.status_code == 200
     body = update_response.json()
     assert body["enabled"] is False
     assert body["daily_summary_time"] == "10:30"
+    assert body["ipo_reminder_enabled"] is True
 
     status_response = client.get("/api/lof/notice/status")
     assert status_response.status_code == 200
     status = status_response.json()
     assert status["enabled"] is False
     assert status["daily_summary_time"] == "10:30"
+    assert status["ipo_reminder_enabled"] is True
 
     invalid_response = client.put("/api/lof/notice/settings", json={"daily_summary_time": "25:00"})
     assert invalid_response.status_code == 422

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +27,8 @@ FEISHU_ACCOUNTS_BASE = "https://accounts.feishu.cn"
 LARK_ACCOUNTS_BASE = "https://accounts.larksuite.com"
 FEISHU_API_BASE = "https://open.feishu.cn"
 FEISHU_SETUP_HINT = "点击接入飞书后用飞书扫码配置机器人；无需手动填写 App ID 或 App Secret。"
+NEW_STOCK_LIST_URL = "https://datapc.eastmoney.com/da/purchase/list2"
+NEW_BOND_LIST_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class LofNoticeConfig:
     notice_dir: Path = Path("data")
     daily_summary_time: str = DEFAULT_DAILY_SUMMARY_TIME
     send_empty_daily_summary: bool = True
+    ipo_reminder_enabled: bool = False
 
     @property
     def state_path(self) -> Path:
@@ -81,6 +84,7 @@ def load_notice_config(env: dict[str, str] | None = None) -> LofNoticeConfig:
         notice_dir=_notice_dir_from_env(source),
         daily_summary_time=(source.get("LOF_NOTICE_DAILY_SUMMARY_TIME") or DEFAULT_DAILY_SUMMARY_TIME).strip() or DEFAULT_DAILY_SUMMARY_TIME,
         send_empty_daily_summary=_bool_env(source.get("LOF_NOTICE_SEND_EMPTY_DAILY_SUMMARY"), default=True),
+        ipo_reminder_enabled=_bool_env(source.get("LOF_IPO_REMINDER_ENABLED"), default=False),
     )
 
 
@@ -108,9 +112,128 @@ def iso_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+@dataclass(frozen=True)
+class NewIssueItem:
+    kind: str
+    code: str
+    name: str
+    apply_code: str | None = None
+    market: str | None = None
+    issue_price: float | None = None
+    apply_limit: float | None = None
+    rating: str | None = None
+    issue_scale_billion: float | None = None
+    underlying: str | None = None
+
+
+@dataclass(frozen=True)
+class NewIssueCalendar:
+    target_date: date
+    stocks: list[NewIssueItem]
+    bonds: list[NewIssueItem]
+    source: str = "eastmoney"
+
+
+class EastmoneyNewIssueSource:
+    def __init__(self, timeout: float = 12.0) -> None:
+        self.timeout = timeout
+
+    async def get_calendar(self, target_date: date) -> NewIssueCalendar:
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://datapc.eastmoney.com/da/purchase/index?color=b"}
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
+            stocks, bonds = await self._fetch_stocks(client, target_date), await self._fetch_bonds(client, target_date)
+        return NewIssueCalendar(target_date=target_date, stocks=stocks, bonds=bonds)
+
+    async def _fetch_stocks(self, client: httpx.AsyncClient, target_date: date) -> list[NewIssueItem]:
+        response = await client.get(
+            NEW_STOCK_LIST_URL,
+            params={"stat": 0, "st": "APPLY_DATE", "sr": -1, "p": 1, "ps": 100},
+        )
+        response.raise_for_status()
+        rows = ((response.json().get("result") or {}).get("data") or [])
+        items: list[NewIssueItem] = []
+        for row in rows:
+            if _parse_date_value(row.get("APPLY_DATE")) != target_date:
+                continue
+            items.append(
+                NewIssueItem(
+                    kind="stock",
+                    code=str(row.get("SECURITY_CODE") or "").strip(),
+                    name=str(row.get("SECURITY_NAME") or "").strip(),
+                    apply_code=_clean_text(row.get("APPLY_CODE")),
+                    market=_clean_text(row.get("MARKET_TYPE") or row.get("TRADE_MARKET")),
+                    issue_price=_parse_float(row.get("ISSUE_PRICE")),
+                    apply_limit=_parse_float(row.get("ONLINE_APPLY_UPPER")),
+                )
+            )
+        return [item for item in items if item.code and item.name]
+
+    async def _fetch_bonds(self, client: httpx.AsyncClient, target_date: date) -> list[NewIssueItem]:
+        day = target_date.isoformat()
+        response = await client.get(
+            NEW_BOND_LIST_URL,
+            params={
+                "sortColumns": "PUBLIC_START_DATE,SECURITY_CODE",
+                "sortTypes": "-1,-1",
+                "pageSize": 100,
+                "pageNumber": 1,
+                "reportName": "RPT_BOND_CB_LIST",
+                "columns": "ALL",
+                "filter": f"(PUBLIC_START_DATE='{day}')",
+            },
+        )
+        response.raise_for_status()
+        rows = ((response.json().get("result") or {}).get("data") or [])
+        items: list[NewIssueItem] = []
+        for row in rows:
+            if _parse_date_value(row.get("PUBLIC_START_DATE")) != target_date:
+                continue
+            items.append(
+                NewIssueItem(
+                    kind="bond",
+                    code=str(row.get("SECURITY_CODE") or "").strip(),
+                    name=str(row.get("SECURITY_NAME_ABBR") or "").strip(),
+                    apply_code=_clean_text(row.get("CORRECODE")),
+                    market=_clean_text(row.get("TRADE_MARKET")),
+                    issue_price=_parse_float(row.get("ISSUE_PRICE")),
+                    rating=_clean_text(row.get("RATING")),
+                    issue_scale_billion=_parse_float(row.get("ACTUAL_ISSUE_SCALE")),
+                    underlying=_clean_text(row.get("SECURITY_SHORT_NAME")),
+                )
+            )
+        return [item for item in items if item.code and item.name]
+
+
+def _parse_float(value: Any) -> float | None:
+    if value in (None, "", "-", "--"):
+        return None
+    if isinstance(value, str):
+        value = value.replace(",", "").replace("%", "").strip()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date_value(value: Any) -> date | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def _clean_text(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    return raw or None
+
+
 class LofNoticeService:
-    def __init__(self, config: LofNoticeConfig | None = None) -> None:
+    def __init__(self, config: LofNoticeConfig | None = None, new_issue_source: Any | None = None) -> None:
         self.config = config or load_notice_config()
+        self.new_issue_source = new_issue_source or EastmoneyNewIssueSource(timeout=self.config.timeout_seconds)
 
     def status(self) -> LofNoticeStatus:
         state = read_json(self.config.state_path, {})
@@ -136,7 +259,9 @@ class LofNoticeService:
             last_status=last_status,
             last_error=last_error,
             daily_summary_time=self.effective_daily_summary_time(state),
+            ipo_reminder_enabled=self.effective_ipo_reminder_enabled(state),
             last_daily_summary_date=state.get("last_daily_summary_date"),
+            last_ipo_reminder_date=state.get("last_ipo_reminder_date"),
             cooldown_count=len(self.active_cooldown_keys()),
             state_path=str(self.config.state_path),
             ledger_path=str(self.config.ledger_path),
@@ -320,6 +445,7 @@ class LofNoticeService:
         *,
         enabled: bool | None = None,
         daily_summary_time: str | None = None,
+        ipo_reminder_enabled: bool | None = None,
     ) -> LofNoticeStatus:
         state = read_json(self.config.state_path, {})
         settings = state.get("settings") if isinstance(state.get("settings"), dict) else {}
@@ -328,6 +454,8 @@ class LofNoticeService:
             settings["enabled"] = bool(enabled)
         if daily_summary_time is not None:
             settings["daily_summary_time"] = self._normalize_hhmm(daily_summary_time)
+        if ipo_reminder_enabled is not None:
+            settings["ipo_reminder_enabled"] = bool(ipo_reminder_enabled)
         state["settings"] = settings
         state["notice_provider"] = "feishu_openapi"
         state["updated_at"] = iso_now()
@@ -350,6 +478,17 @@ class LofNoticeService:
             return self._normalize_hhmm(raw)
         except AppError:
             return DEFAULT_DAILY_SUMMARY_TIME
+
+    def effective_ipo_reminder_enabled(self, state: dict[str, Any] | None = None) -> bool:
+        settings = self._settings_from_state(state)
+        if "ipo_reminder_enabled" not in settings:
+            return bool(self.config.ipo_reminder_enabled)
+        return bool(settings.get("ipo_reminder_enabled"))
+
+    def should_run_daily_summary(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now(UTC)
+        local = now.astimezone(MARKET_TZ)
+        return local.weekday() < 5 and self._is_after_daily_summary_time(local, self.effective_daily_summary_time())
 
     def _settings_from_state(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = state if state is not None else read_json(self.config.state_path, {})
@@ -441,6 +580,70 @@ class LofNoticeService:
         if row.get("status") == "sent":
             state["last_daily_summary_date"] = today
             state["last_daily_summary_at"] = now.isoformat(timespec="seconds")
+        result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
+        self._write_state(state, result, now=now)
+        return result
+
+    async def notify_new_issue_reminder(
+        self,
+        *,
+        now: datetime | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        now = now or datetime.now(UTC)
+        state = read_json(self.config.state_path, {})
+        if not self.effective_enabled(state):
+            result = self._state_result("disabled", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        if not self.effective_ipo_reminder_enabled(state):
+            result = self._state_result("ipo_reminder_disabled", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        local = now.astimezone(MARKET_TZ)
+        today = local.date().isoformat()
+        if not force and local.weekday() >= 5:
+            result = self._state_result("skipped_non_trading_day", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        if not force and state.get("last_ipo_reminder_date") == today:
+            result = self._state_result("skipped_duplicate_ipo_reminder", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        reminder_time = self._ipo_reminder_time(self.effective_daily_summary_time(state))
+        if not force and local.time() < reminder_time:
+            result = self._state_result("skipped_before_ipo_reminder_time", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        try:
+            calendar = await self.new_issue_source.get_calendar(local.date())
+        except httpx.HTTPError as exc:
+            result = self._state_result("failed_new_issue_fetch", now=now, last_error=str(exc), rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        except Exception as exc:
+            result = self._state_result("failed_new_issue_fetch", now=now, last_error=str(exc), rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        count = len(calendar.stocks) + len(calendar.bonds)
+        if count == 0:
+            result = self._state_result("no_new_issue_items", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        text = self._format_new_issue_reminder(calendar, now=now)
+        row = {
+            "created_at": now.isoformat(timespec="seconds"),
+            "kind": "new_issue_reminder",
+            "summary_date": today,
+            "count": count,
+            "stock_count": len(calendar.stocks),
+            "bond_count": len(calendar.bonds),
+            **self._send_feishu_openapi(text, state=state),
+        }
+        append_jsonl(self.config.ledger_path, [row])
+        if row.get("status") == "sent":
+            state["last_ipo_reminder_date"] = today
+            state["last_ipo_reminder_at"] = now.isoformat(timespec="seconds")
         result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
         self._write_state(state, result, now=now)
         return result
@@ -559,6 +762,40 @@ class LofNoticeService:
         return last_summary is None or (now - last_summary).total_seconds() >= SUMMARY_INTERVAL_SECONDS
 
     @staticmethod
+    def _format_new_issue_reminder(calendar: NewIssueCalendar, *, now: datetime) -> str:
+        local_now = now.astimezone(MARKET_TZ)
+        lines = [
+            f"【打新提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
+            f"今日可打新：新股 {len(calendar.stocks)} 只，新债 {len(calendar.bonds)} 只",
+        ]
+        if calendar.stocks:
+            lines.extend(["", "新股："])
+            for item in calendar.stocks[:10]:
+                market = f"，{item.market}" if item.market else ""
+                lines.extend(
+                    [
+                        f"{item.code} {item.name}（申购代码 {item.apply_code or item.code}{market}）",
+                        f"发行价：{LofNoticeService._format_price(item.issue_price)}；申购上限：{LofNoticeService._format_share_limit(item.apply_limit)}",
+                    ]
+                )
+            if len(calendar.stocks) > 10:
+                lines.append(f"另有 {len(calendar.stocks) - 10} 只新股未列出。")
+        if calendar.bonds:
+            lines.extend(["", "新债："])
+            for item in calendar.bonds[:10]:
+                underlying = f"，正股 {item.underlying}" if item.underlying else ""
+                lines.extend(
+                    [
+                        f"{item.code} {item.name}（申购代码 {item.apply_code or item.code}{underlying}）",
+                        f"评级：{item.rating or '--'}；规模：{LofNoticeService._format_billion(item.issue_scale_billion)}",
+                    ]
+                )
+            if len(calendar.bonds) > 10:
+                lines.append(f"另有 {len(calendar.bonds) - 10} 只新债未列出。")
+        lines.extend(["", "操作提示：在券商客户端的新股/新债申购入口处理；中签后注意缴款日和账户可用资金。"])
+        return "\n".join(lines)
+
+    @staticmethod
     def _format_candidate(item: LofPremiumItem, *, reason: str, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> str:
         return LofNoticeService._format_alert([item], now=datetime.now(UTC), min_turnover_yuan=min_turnover_yuan)
 
@@ -658,8 +895,33 @@ class LofNoticeService:
             return "--"
         return LofNoticeService._format_money(value)
 
+    @staticmethod
+    def _format_price(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:.2f}"
+
+    @staticmethod
+    def _format_share_limit(value: float | None) -> str:
+        if value is None:
+            return "--"
+        if abs(value) >= 10000:
+            return f"{value / 10000:.2f}万股"
+        return f"{value:.0f}股"
+
+    @staticmethod
+    def _format_billion(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:.2f}亿"
+
     def _is_after_daily_summary_time(self, local_now: datetime, summary_time: str | None = None) -> bool:
         return local_now.time() >= self._parse_hhmm(summary_time or self.effective_daily_summary_time())
+
+    @staticmethod
+    def _ipo_reminder_time(summary_time: str) -> time:
+        base = datetime.combine(date(2000, 1, 2), LofNoticeService._parse_hhmm(summary_time))
+        return (base - timedelta(minutes=15)).time()
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:

@@ -66,6 +66,7 @@ const els = {
   riskList: document.querySelector("#lofRiskList"),
   noticeEnabledInput: document.querySelector("#noticeEnabledInput"),
   noticeTimeInput: document.querySelector("#noticeTimeInput"),
+  ipoReminderToggleBtn: document.querySelector("#ipoReminderToggleBtn"),
   noticeConnectBtn: document.querySelector("#noticeConnectBtn"),
   noticeDisconnectBtn: document.querySelector("#noticeDisconnectBtn"),
   noticeConnectPanel: document.querySelector("#noticeConnectPanel"),
@@ -239,6 +240,8 @@ async function loadWatchlist() {
 function syncNoticeInputs(status) {
   els.noticeEnabledInput.checked = Boolean(status.enabled);
   els.noticeTimeInput.value = status.daily_summary_time || "10:00";
+  els.ipoReminderToggleBtn.textContent = status.ipo_reminder_enabled ? "打新提醒开" : "打新提醒关";
+  els.ipoReminderToggleBtn.setAttribute("aria-pressed", status.ipo_reminder_enabled ? "true" : "false");
 }
 
 function renderNoticeStatus(prefix = "") {
@@ -254,10 +257,11 @@ function renderNoticeStatus(prefix = "") {
       ? `已绑定/${status.target_name || status.target_kind}`
       : "未接入飞书";
   const lastText = status.last_status ? `最近:${status.last_status}` : "尚未发送";
+  const ipoText = status.ipo_reminder_enabled ? "打新开" : "打新关";
   const errorText = status.last_error ? ` · ${status.last_error}` : "";
   const head = prefix ? `${prefix} · ` : "";
   const setupText = status.setup_hint ? ` · ${status.setup_hint}` : "";
-  els.noticeStatusText.textContent = `${head}${enabledText} · ${status.daily_summary_time || "10:00"} · ${targetText} · ${lastText}${errorText}${setupText}`;
+  els.noticeStatusText.textContent = `${head}${enabledText} · ${status.daily_summary_time || "10:00"} · ${ipoText} · ${targetText} · ${lastText}${errorText}${setupText}`;
   if (status.connected) state.noticeConnectPending = false;
   if (!state.noticeConnectPending) {
     els.noticeConnectPanel.hidden = true;
@@ -270,6 +274,7 @@ function renderNoticeStatus(prefix = "") {
   els.noticeConnectBtn.textContent = status.connected || state.noticeConnectPending ? "重新接入" : "接入飞书";
   els.noticeDisconnectBtn.hidden = !status.connected;
   els.noticeDisconnectBtn.disabled = state.noticeInFlight;
+  els.ipoReminderToggleBtn.disabled = state.noticeInFlight;
   els.noticeTestBtn.disabled = state.noticeInFlight || !status.target_set || !status.app_configured;
 }
 
@@ -284,7 +289,7 @@ async function loadNoticeStatus() {
   }
 }
 
-async function saveNoticeSettings(prefix = "已自动保存") {
+async function saveNoticeSettings(prefix = "已自动保存", overrides = {}) {
   if (state.noticeInFlight) return;
   state.noticeInFlight = true;
   els.noticeStatusText.textContent = "保存通知设置...";
@@ -293,8 +298,9 @@ async function saveNoticeSettings(prefix = "已自动保存") {
     const status = await api("/api/lof/notice/settings", {
       method: "PUT",
       body: JSON.stringify({
-        enabled: els.noticeEnabledInput.checked,
-        daily_summary_time: els.noticeTimeInput.value || "10:00",
+        enabled: overrides.enabled ?? els.noticeEnabledInput.checked,
+        daily_summary_time: overrides.daily_summary_time ?? (els.noticeTimeInput.value || "10:00"),
+        ipo_reminder_enabled: overrides.ipo_reminder_enabled ?? Boolean(state.noticeStatus?.ipo_reminder_enabled),
       }),
     });
     state.noticeStatus = status;
@@ -852,6 +858,11 @@ els.noticeEnabledInput.addEventListener("change", () => {
 
 els.noticeTimeInput.addEventListener("change", () => {
   saveNoticeSettings("通知时间已更新");
+});
+
+els.ipoReminderToggleBtn.addEventListener("click", () => {
+  const next = !Boolean(state.noticeStatus?.ipo_reminder_enabled);
+  saveNoticeSettings(next ? "打新提醒已开启" : "打新提醒已关闭", { ipo_reminder_enabled: next });
 });
 
 els.noticeTestBtn.addEventListener("click", () => {

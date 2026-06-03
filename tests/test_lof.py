@@ -10,7 +10,7 @@ from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
 from fund_estimator.services.lof import EastmoneyLofTradingStatusDataSource, LofMonitorService
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
-from fund_estimator.services.lof_notifications import LofNoticeConfig, LofNoticeService
+from fund_estimator.services.lof_notifications import LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
 
 
 class DummyEstimator:
@@ -105,6 +105,16 @@ class DummyProxySource:
 class DummyHaoEtfSource:
     async def get_snapshots(self, codes: list[str]):
         return {}
+
+
+class DummyNewIssueSource:
+    def __init__(self, calendar: NewIssueCalendar) -> None:
+        self.calendar = calendar
+        self.calls: list[date] = []
+
+    async def get_calendar(self, target_date: date) -> NewIssueCalendar:
+        self.calls.append(target_date)
+        return self.calendar
 
 
 def make_service(tmp_path) -> LofMonitorService:
@@ -468,6 +478,99 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "成交额：800万；估算溢价：-4.50%" in sent_texts[0]
     assert "操作建议：折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。" in sent_texts[0]
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
+
+
+def test_new_issue_reminder_sends_15_minutes_before_notice_time(tmp_path):
+    calendar = NewIssueCalendar(
+        target_date=date(2026, 6, 3),
+        stocks=[
+            NewIssueItem(
+                kind="stock",
+                code="920126",
+                name="永大股份",
+                apply_code="920126",
+                market="北交所",
+                issue_price=7.79,
+                apply_limit=2_093_400,
+            )
+        ],
+        bonds=[
+            NewIssueItem(
+                kind="bond",
+                code="118068",
+                name="迪威转债",
+                apply_code="718377",
+                rating="AA-",
+                issue_scale_billion=9.07705,
+                underlying="迪威尔",
+            )
+        ],
+    )
+    source = DummyNewIssueSource(calendar)
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        ipo_reminder_enabled=True,
+    )
+    notice = LofNoticeService(config, new_issue_source=source)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+
+    before = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 44, tzinfo=UTC)))
+    first = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 45, tzinfo=UTC)))
+    second = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 50, tzinfo=UTC)))
+
+    assert before["status"] == "skipped_before_ipo_reminder_time"
+    assert first["status"] == "sent"
+    assert second["status"] == "skipped_duplicate_ipo_reminder"
+    assert source.calls == [date(2026, 6, 3)]
+    assert sent_texts == [
+        "\n".join(
+            [
+                "【打新提醒】2026-06-03 09:45",
+                "今日可打新：新股 1 只，新债 1 只",
+                "",
+                "新股：",
+                "920126 永大股份（申购代码 920126，北交所）",
+                "发行价：7.79；申购上限：209.34万股",
+                "",
+                "新债：",
+                "118068 迪威转债（申购代码 718377，正股 迪威尔）",
+                "评级：AA-；规模：9.08亿",
+                "",
+                "操作提示：在券商客户端的新股/新债申购入口处理；中签后注意缴款日和账户可用资金。",
+            ]
+        )
+    ]
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state["last_ipo_reminder_date"] == "2026-06-03"
+
+
+def test_new_issue_reminder_skips_when_disabled_or_empty(tmp_path):
+    calendar = NewIssueCalendar(target_date=date(2026, 6, 3), stocks=[], bonds=[])
+    source = DummyNewIssueSource(calendar)
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        ipo_reminder_enabled=False,
+    )
+    notice = LofNoticeService(config, new_issue_source=source)
+    notice._send_feishu_openapi = lambda text, *, state: {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+
+    disabled = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 45, tzinfo=UTC)))
+    notice.update_settings(ipo_reminder_enabled=True)
+    empty = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 50, tzinfo=UTC)))
+
+    assert disabled["status"] == "ipo_reminder_disabled"
+    assert empty["status"] == "no_new_issue_items"
 
 
 def test_lof_notice_test_uses_alert_template(tmp_path):
