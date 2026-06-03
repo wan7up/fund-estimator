@@ -233,6 +233,14 @@ button:hover:not(:disabled) {
   width: 100%;
 }
 
+.notice-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
 .notice-switch,
 .notice-time {
   display: inline-flex;
@@ -814,19 +822,42 @@ small {
   }
 
   .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
   }
 
   .summary-grid .summary-card:first-child {
-    grid-column: span 2;
+    grid-column: auto;
   }
 
   .summary-card {
-    padding: 10px 12px;
+    border: 0;
+    border-right: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 7px 3px;
+    text-align: center;
+  }
+
+  .summary-card:last-child {
+    border-right: 0;
+  }
+
+  .summary-card span {
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .summary-card strong {
-    font-size: 20px;
+    margin-top: 2px;
+    font-size: 18px;
   }
 
   .notice-settings-bar {
@@ -835,14 +866,15 @@ small {
   }
 
   .notice-settings-main {
-    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .notice-settings-actions {
     gap: 8px;
   }
 
   .notice-connect-actions {
-    flex: 1 1 100%;
     gap: 8px;
-    margin-left: 0;
   }
 
   .notice-switch {
