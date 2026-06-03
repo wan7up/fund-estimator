@@ -47,6 +47,7 @@ CORE_CROSS_BORDER_LOFS: tuple[CoreLof, ...] = (
 CORE_LOF_BY_CODE = {item.code: item for item in CORE_CROSS_BORDER_LOFS}
 
 LOF_CODE_PREFIXES = ("16", "501", "502", "503", "505", "506")
+CLOSED_FUND_KEYWORDS = ("定开", "封闭", "封闭式", "持有期", "战略配售")
 
 
 def looks_like_lof_code(code: str) -> bool:
@@ -56,4 +57,15 @@ def looks_like_lof_code(code: str) -> bool:
 
 def looks_like_lof_name(name: str | None) -> bool:
     text = str(name or "").upper()
+    if any(keyword in text for keyword in CLOSED_FUND_KEYWORDS):
+        return False
     return "LOF" in text or "QDII" in text or "跨境" in text
+
+
+def looks_like_lof_fund(code: str, name: str | None, fund_type: str | None = None) -> bool:
+    if str(code or "").strip() in CORE_LOF_BY_CODE:
+        return True
+    text = f"{name or ''} {fund_type or ''}".upper()
+    if any(keyword in text for keyword in CLOSED_FUND_KEYWORDS):
+        return False
+    return looks_like_lof_name(name) or looks_like_lof_name(fund_type)

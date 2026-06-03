@@ -29,7 +29,7 @@ from fund_estimator.services.lof_config import (
     CORE_CROSS_BORDER_LOFS,
     CORE_LOF_BY_CODE,
     CoreLof,
-    looks_like_lof_code,
+    looks_like_lof_fund,
     looks_like_lof_name,
 )
 
@@ -465,18 +465,14 @@ class LofMonitorService:
 
     async def search_lofs(self, query: str) -> list[FundSearchResult]:
         results = await self.estimator.search_funds(query)
-        return [
-            item
-            for item in results
-            if looks_like_lof_code(item.code) or looks_like_lof_name(item.name) or item.code in CORE_LOF_BY_CODE
-        ][:30]
+        return [item for item in results if looks_like_lof_fund(item.code, item.name, item.fund_type)][:30]
 
     def list_watchlist(self, device_id: str) -> list[LofWatchlistItem]:
         return [LofWatchlistItem(**dict(row)) for row in self.cache.list_lof_watchlist(device_id)]
 
     async def add_watchlist(self, code: str, device_id: str) -> LofWatchlistItem:
         profile = await self.estimator.get_profile(code)
-        if not (looks_like_lof_code(profile.code) or looks_like_lof_name(profile.name) or profile.code in CORE_LOF_BY_CODE):
+        if not looks_like_lof_fund(profile.code, profile.name, profile.fund_type):
             raise AppError("NOT_LOF_FUND", "当前基金不像 LOF/QDII 场内监控标的", status_code=422, details={"code": code})
         self.cache.add_lof_watchlist(profile.code, profile.name, device_id)
         return next(item for item in self.list_watchlist(device_id) if item.code == profile.code)
@@ -499,9 +495,9 @@ class LofMonitorService:
         limit: int = 80,
         refresh: bool = True,
     ) -> LofOpportunityResponse:
-        cache_key = f"v4:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+        cache_key = f"v5:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
         if not refresh:
-            fallback_key = f"v4:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+            fallback_key = f"v5:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
             cache_keys = [cache_key]
             if fallback_key != cache_key:
                 cache_keys.append(fallback_key)
@@ -562,7 +558,7 @@ class LofMonitorService:
             status_result = status_result_map.get(code)
             if profile_result is None:
                 quote = quote_map.get(code)
-                if quote is not None:
+                if quote is not None and self._is_displayable_lof(code, quote=quote):
                     items.append(
                         self._build_quote_only_item(
                             quote=quote,
@@ -573,25 +569,29 @@ class LofMonitorService:
                 continue
             if isinstance(profile_result, Exception):
                 errors.append(f"{code}: {profile_result}")
-                if code in CORE_LOF_BY_CODE or quote_map.get(code) is not None:
+                quote = quote_map.get(code)
+                if self._is_displayable_lof(code, quote=quote):
                     items.append(
                         self._build_unavailable_item(
                             code=code,
-                            quote=quote_map.get(code),
+                            quote=quote,
                             error=str(profile_result),
                             normal_threshold_pct=normal_threshold_pct,
                             strong_threshold_pct=strong_threshold_pct,
                             min_turnover_yuan=min_turnover_yuan,
                             now=scanned_at,
                         )
-                    )
+                )
                 continue
             profile = profile_result
+            quote = quote_map.get(code)
+            if not self._is_displayable_lof(code, profile=profile, quote=quote):
+                continue
             status = status_result if isinstance(status_result, LofTradingStatus) else LofTradingStatus(warning=str(status_result))
             item = self._build_item(
                 code=code,
                 profile=profile,
-                quote=quote_map.get(code),
+                quote=quote,
                 status=status,
                 haoetf_snapshot=haoetf_map.get(code),
                 proxy_changes=proxy_map,
@@ -772,7 +772,7 @@ class LofMonitorService:
         candidate_codes = [
             item.code
             for item in funds
-            if looks_like_lof_code(item.code) or looks_like_lof_name(item.name)
+            if looks_like_lof_fund(item.code, item.name, item.fund_type)
         ]
         if not candidate_codes:
             return {}
@@ -791,7 +791,7 @@ class LofMonitorService:
     ) -> list[str]:
         if not quote_map:
             return []
-        cache_key = "v1"
+        cache_key = "v2"
         cached = self.cache.get("lof_discovered_lof_codes", cache_key)
         if cached and isinstance(cached.get("codes"), list):
             return [str(code) for code in cached["codes"]]
@@ -803,7 +803,7 @@ class LofMonitorService:
             if quote.code not in base_set
             and quote.latest_price is not None
             and quote.latest_price > 0
-            and (looks_like_lof_code(quote.code) or looks_like_lof_name(quote.name))
+            and looks_like_lof_name(quote.name)
         ]
         candidates.sort(key=lambda quote: (-(quote.turnover_yuan or 0), quote.code))
 
@@ -822,6 +822,21 @@ class LofMonitorService:
         if not codes and candidates:
             errors.append("全市场发现层未发现超过阈值的新增 LOF 溢价候选")
         return codes
+
+    @staticmethod
+    def _is_displayable_lof(
+        code: str,
+        *,
+        profile: FundProfile | None = None,
+        quote: LofMarketQuote | None = None,
+    ) -> bool:
+        if code in CORE_LOF_BY_CODE:
+            return True
+        if profile is not None and looks_like_lof_fund(profile.code, profile.name, profile.fund_type):
+            return True
+        if quote is not None and looks_like_lof_name(quote.name):
+            return True
+        return False
 
     async def _get_market_quotes(
         self,

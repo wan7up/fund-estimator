@@ -20,10 +20,23 @@ class DummyEstimator:
     async def search_funds(self, query: str):
         return [
             FundSearchResult(code="161128", name="易方达标普信息科技指数(QDII-LOF)A", fund_type="QDII", pinyin="YFD"),
+            FundSearchResult(code="501046", name="财通多策略福鑫定开混合", fund_type="混合型-灵活", pinyin="CT"),
             FundSearchResult(code="001438", name="普通混合", fund_type="混合型", pinyin="PT"),
         ]
 
     async def get_profile(self, code: str) -> FundProfile:
+        if code == "501046":
+            return FundProfile(
+                code=code,
+                name="财通多策略福鑫定开混合",
+                fund_type="混合型-灵活",
+                nav_date=date(2026, 5, 29),
+                last_nav=1.0,
+                previous_nav_date=date(2026, 5, 28),
+                previous_nav=0.99,
+                actual_change_pct=1.0,
+                source="mock",
+            )
         return FundProfile(
             code=code,
             name=f"核心LOF{code}",
@@ -49,7 +62,7 @@ class DummyMarketSource:
         return {
             code: LofMarketQuote(
                 code=code,
-                name="新机会LOF" if code == "160999" else f"核心LOF{code}",
+                name="财通福鑫" if code == "501046" else "新机会LOF" if code == "160999" else f"核心LOF{code}",
                 latest_price=1.08 if code == "160999" else 1.05 if code == "161128" else 1.01,
                 previous_close=1.0,
                 change_pct=5.0,
@@ -62,7 +75,7 @@ class DummyMarketSource:
         }
 
     async def get_all_quotes(self):
-        return await self.get_quotes(["160999", "160998"])
+        return await self.get_quotes(["160999", "160998", "501046"])
 
 
 class FailingMarketSource:
@@ -143,6 +156,17 @@ def test_lof_search_filters_non_lof(tmp_path):
     assert [item.code for item in results] == ["161128"]
 
 
+def test_lof_watchlist_rejects_closed_end_fund(tmp_path):
+    service = make_service(tmp_path)
+
+    try:
+        __import__("asyncio").run(service.add_watchlist("501046", "phone-a"))
+    except AppError as exc:
+        assert exc.code == "NOT_LOF_FUND"
+    else:
+        raise AssertionError("closed-end fund should not be accepted as a LOF watch item")
+
+
 def test_hot_hong_kong_us_internet_lof_is_in_core_pool():
     item = CORE_LOF_BY_CODE["160644"]
 
@@ -181,6 +205,14 @@ def test_lof_scan_includes_non_core_lof_below_opportunity_threshold(tmp_path):
     assert item.is_opportunity is False
     assert item.actionable is False
     assert item.exchange_turnover_yuan == 100_000
+
+
+def test_lof_scan_excludes_closed_end_funds_from_display_pool(tmp_path):
+    service = make_service(tmp_path)
+
+    response = __import__("asyncio").run(service.get_opportunities(limit=200))
+
+    assert "501046" not in {row.code for row in response.items}
 
 
 def test_sina_lof_quote_parses_hot_hong_kong_us_internet_quote():
@@ -370,7 +402,7 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert state["last_daily_summary_date"] == "2026-05-29"
 
 
-def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
+def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path):
     config = LofNoticeConfig(
         enabled=True,
         app_id="cli_test",
@@ -408,13 +440,14 @@ def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
         core_count=0,
         watchlist_count=0,
         items=[
-            item("160001", 1.2, 5_000_000),
-            item("160002", 2.5, 8_000_000),
-            item("160003", 3.0, 9_000_000, "暂停"),
+            item("160001", 3.2, 5_000_000),
+            item("160002", -4.5, 8_000_000),
+            item("160003", 5.0, 9_000_000, "暂停"),
             item("160004", 4.0, 100_000),
-            item("160005", 0.9, 10_000_000),
+            item("160005", 3.0, 10_000_000),
             item("160006", 5.0, 20_000_000, "unknown"),
-            item("160007", 1.1, 4_000_000, "限制大额"),
+            item("160007", 3.1, 4_000_000, "限制大额"),
+            item("160008", -3.2, 3_000_000),
         ],
     )
 
@@ -422,16 +455,17 @@ def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
 
     assert result["status"] == "sent"
     assert len(sent_texts) == 1
+    assert "160006 测试LOF160006" in sent_texts[0]
     assert "160002 测试LOF160002" in sent_texts[0]
     assert "160001 测试LOF160001" in sent_texts[0]
     assert "160007 测试LOF160007" in sent_texts[0]
-    assert "\n\n160001 测试LOF160001" in sent_texts[0]
     assert "160003" not in sent_texts[0]
     assert "160004" not in sent_texts[0]
     assert "160005" not in sent_texts[0]
-    assert "160006" not in sent_texts[0]
-    assert "成交额：800万；估算溢价：+2.50%" in sent_texts[0]
-    assert "操作建议：溢价超过1%，成交额达标；优先确认申购开放、限额和费率，再评估申购转场内卖出。" in sent_texts[0]
+    assert "160008" not in sent_texts[0]
+    assert "成交额：800万；估算溢价：-4.50%" in sent_texts[0]
+    assert "操作建议：折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。" in sent_texts[0]
+    assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
 
 
 def test_lof_notice_test_uses_alert_template(tmp_path):
@@ -456,7 +490,7 @@ def test_lof_notice_test_uses_alert_template(tmp_path):
             [
                 "【LOF套利机会提醒】2026-06-03 10:04",
                 "501312 核心LOF501312",
-                "操作建议：当前溢价未超过提醒阈值，建议仅观察。",
+                "操作建议：当前折溢价未超过提醒阈值，建议仅观察。",
                 "成交额：10万；估算溢价：+0.00%",
                 "官方净值溢价：+1.00%；申购限额1万",
             ]
