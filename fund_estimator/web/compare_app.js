@@ -110,8 +110,6 @@ const els = {
   aiStatusText: document.querySelector("#aiStatusText"),
   aiGenerateBtn: document.querySelector("#aiGenerateBtn"),
   aiDisabled: document.querySelector("#aiDisabled"),
-  aiAuthPrompt: document.querySelector("#aiAuthPrompt"),
-  aiAuthOpenBtn: document.querySelector("#aiAuthOpenBtn"),
   aiConfigSummary: document.querySelector("#aiConfigSummary"),
   aiConfigSummaryTitle: document.querySelector("#aiConfigSummaryTitle"),
   aiConfigSummaryMeta: document.querySelector("#aiConfigSummaryMeta"),
@@ -123,6 +121,8 @@ const els = {
   aiPasswordCancelBtn: document.querySelector("#aiPasswordCancelBtn"),
   aiPasswordError: document.querySelector("#aiPasswordError"),
   aiConfig: document.querySelector("#aiConfig"),
+  aiApiFields: document.querySelector("#aiApiFields"),
+  aiModelFields: document.querySelector("#aiModelFields"),
   aiBaseUrlInput: document.querySelector("#aiBaseUrlInput"),
   aiKeyInput: document.querySelector("#aiKeyInput"),
   aiHttpWarning: document.querySelector("#aiHttpWarning"),
@@ -285,6 +285,15 @@ function closeAiPasswordModal() {
   setAiPasswordError("");
 }
 
+function cancelAiEnable() {
+  closeAiPasswordModal();
+  if (!state.ai.status?.authenticated) {
+    state.ai.expanded = false;
+    state.ai.editingConfig = false;
+  }
+  renderAiPanel();
+}
+
 function updateAiHttpWarning() {
   const value = els.aiBaseUrlInput.value.trim().toLowerCase();
   els.aiHttpWarning.hidden = !value.startsWith("http://");
@@ -327,8 +336,12 @@ function aiPersonaLabel(status) {
   return persona?.label || status?.persona_id || "默认研究员";
 }
 
+function hasSavedAiApi(status) {
+  return Boolean(status?.api_key_masked);
+}
+
 function renderAiConfigSummary(status) {
-  els.aiConfigSummaryTitle.textContent = status.selected_model || "AI 已配置";
+  els.aiConfigSummaryTitle.textContent = status.selected_model || (hasSavedAiApi(status) ? "API 已保存，待选择模型" : "AI 已配置");
   const parts = [
     status.base_url || DEFAULT_AI_BASE_URL,
     aiPersonaLabel(status),
@@ -341,6 +354,7 @@ function aiCompactStatus(status) {
   if (!status) return "检查配置中";
   if (!status.enabled) return "可选 AI 评价：服务器未启用";
   if (!status.authenticated) return "可选 AI 评价：需验证后使用";
+  if (!hasSavedAiApi(status)) return "可选 AI 评价：待保存 API";
   if (!status.configured) return "可选 AI 评价：待配置模型";
   return `可选 AI 评价：${status.selected_model || "已配置"}`;
 }
@@ -348,19 +362,25 @@ function aiCompactStatus(status) {
 function renderAiPanel() {
   const status = state.ai.status;
   const busy = state.ai.loading;
+  if (status?.enabled && !status.authenticated && state.ai.expanded) {
+    state.ai.expanded = false;
+  }
   const expanded = Boolean(state.ai.expanded);
   els.aiPanel.classList.toggle("ai-expanded", expanded);
   els.aiPanel.classList.toggle("ai-collapsed", !expanded);
   els.aiEnableToggle.checked = expanded;
-  els.aiBody.hidden = !expanded;
-  els.aiGenerateBtn.hidden = !expanded;
+  els.aiBody.hidden = true;
+  els.aiPanel.classList.remove("ai-has-body");
+  els.aiGenerateBtn.hidden = !expanded || !status?.authenticated || !status.configured;
   els.aiGenerateBtn.disabled = busy || !state.result || !status?.enabled || !status.authenticated || !status.configured;
+  els.aiModifyApiBtn.hidden = true;
   els.aiDisabled.hidden = true;
-  els.aiAuthPrompt.hidden = true;
   els.aiConfigSummary.hidden = true;
   els.aiConfig.hidden = true;
+  els.aiApiFields.hidden = true;
+  els.aiModelFields.hidden = true;
   els.aiSaveFetchBtn.disabled = busy;
-  els.aiFetchModelsBtn.disabled = busy || !status?.authenticated;
+  els.aiFetchModelsBtn.disabled = busy || !status?.authenticated || !hasSavedAiApi(status);
   els.aiSaveConfigBtn.disabled = busy;
   els.aiGenerateBtn.textContent = busy ? "处理中" : "生成评价";
 
@@ -375,19 +395,25 @@ function renderAiPanel() {
     els.aiStatusText.textContent = "未启用";
     els.aiDisabled.hidden = false;
   } else if (!status.authenticated) {
-    els.aiStatusText.textContent = "需要验证";
-    els.aiAuthPrompt.hidden = false;
+    els.aiStatusText.textContent = aiCompactStatus(status);
+    els.aiGenerateBtn.hidden = true;
   } else {
-    if (!status.configured) {
+    const hasApi = hasSavedAiApi(status);
+    if (!hasApi) {
       state.ai.editingConfig = true;
     }
-    if (status.configured && !state.ai.editingConfig) {
+    els.aiModifyApiBtn.hidden = !hasApi || state.ai.editingConfig;
+    if (hasApi && !status.configured && !state.ai.editingConfig) {
       els.aiConfigSummary.hidden = false;
       renderAiConfigSummary(status);
-      els.aiStatusText.textContent = `${status.selected_model} · 已配置`;
+    }
+    if (status.configured && !state.ai.editingConfig) {
+      els.aiStatusText.textContent = `${status.selected_model || "AI"} · 已配置`;
     } else {
       els.aiConfig.hidden = false;
-      els.aiStatusText.textContent = status.configured ? "修改API设置" : "待配置模型";
+      els.aiApiFields.hidden = hasApi && !state.ai.editingConfig;
+      els.aiModelFields.hidden = false;
+      els.aiStatusText.textContent = !hasApi ? "待保存 API" : status.configured ? "修改API设置" : "待选择模型";
     }
   }
 
@@ -400,6 +426,12 @@ function renderAiPanel() {
     els.aiOutput.hidden = true;
     els.aiOutput.textContent = state.result ? "可基于当前规则结果生成 AI 评价" : "完成基金对比后，可生成 AI 评价";
   }
+
+  const hasBodyContent =
+    expanded &&
+    (!els.aiDisabled.hidden || !els.aiConfigSummary.hidden || !els.aiConfig.hidden || !els.aiError.hidden || !els.aiOutput.hidden);
+  els.aiBody.hidden = !hasBodyContent;
+  els.aiPanel.classList.toggle("ai-has-body", hasBodyContent);
 }
 
 async function loadAiStatus() {
@@ -408,8 +440,8 @@ async function loadAiStatus() {
     state.ai.status = status;
     if (!status.authenticated) {
       state.ai.editingConfig = false;
-    } else if (!status.configured) {
-      state.ai.editingConfig = true;
+    } else {
+      state.ai.editingConfig = !hasSavedAiApi(status);
     }
     syncAiInputs(status);
     setAiError("");
@@ -444,7 +476,7 @@ async function saveAiConfig(fetchAfterSave = false) {
       body: JSON.stringify(collectAiConfigPayload()),
     });
     state.ai.status = status;
-    state.ai.editingConfig = !status.configured;
+    state.ai.editingConfig = !hasSavedAiApi(status);
     syncAiInputs(status);
     if (fetchAfterSave) {
       const data = await api("/api/compare/ai/models");
@@ -479,7 +511,7 @@ async function loginAi(event) {
   event.preventDefault();
   const password = els.aiPasswordInput.value.trim();
   if (!password) {
-    setAiError("请输入 AI 管理密码");
+    cancelAiEnable();
     return;
   }
   state.ai.loading = true;
@@ -492,7 +524,8 @@ async function loginAi(event) {
     });
     closeAiPasswordModal();
     state.ai.status = status;
-    state.ai.editingConfig = !status.configured;
+    state.ai.expanded = true;
+    state.ai.editingConfig = !hasSavedAiApi(status);
     syncAiInputs(status);
     setAiError("");
   } catch (error) {
@@ -877,30 +910,36 @@ els.compareBtn.addEventListener("click", () => {
 });
 
 els.aiEnableToggle.addEventListener("change", () => {
-  state.ai.expanded = els.aiEnableToggle.checked;
-  renderAiPanel();
-  if (state.ai.expanded && state.ai.status?.enabled && !state.ai.status.authenticated) {
-    openAiPasswordModal();
+  const checked = els.aiEnableToggle.checked;
+  if (!checked) {
+    state.ai.expanded = false;
+    closeAiPasswordModal();
+    renderAiPanel();
+    return;
   }
-});
-
-els.aiAuthOpenBtn.addEventListener("click", () => {
-  openAiPasswordModal();
+  if (state.ai.status?.enabled && !state.ai.status.authenticated) {
+    state.ai.expanded = false;
+    renderAiPanel();
+    openAiPasswordModal();
+    return;
+  }
+  state.ai.expanded = true;
+  renderAiPanel();
 });
 
 els.aiPasswordCloseBtn.addEventListener("click", () => {
-  closeAiPasswordModal();
+  cancelAiEnable();
 });
 
 els.aiPasswordCancelBtn.addEventListener("click", () => {
-  closeAiPasswordModal();
+  cancelAiEnable();
 });
 
 els.aiLoginForm.addEventListener("submit", loginAi);
 
 els.aiPasswordModal.addEventListener("click", (event) => {
   if (event.target === els.aiPasswordModal) {
-    closeAiPasswordModal();
+    cancelAiEnable();
   }
 });
 

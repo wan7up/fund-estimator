@@ -7,7 +7,7 @@
     <title>基金对比器</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-20260603.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-20260603.png" />
-    <link rel="stylesheet" href="/static/compare.css?v=20260603c" />
+    <link rel="stylesheet" href="/static/compare.css?v=20260603d" />
   </head>
   <body>
     <header class="topbar">
@@ -63,51 +63,53 @@
             <span>启用AI评测</span>
           </label>
           <span id="aiStatusText">检查配置中</span>
+          <button id="aiModifyApiBtn" class="ai-modify" type="button" hidden>修改API</button>
           <button id="aiGenerateBtn" class="primary-btn ai-generate" type="button" disabled hidden>生成评价</button>
         </div>
         <div id="aiBody" class="ai-body" hidden>
           <div id="aiDisabled" class="ai-state" hidden>AI 功能未启用</div>
-          <div id="aiAuthPrompt" class="ai-inline-row" hidden>
-            <span>需要验证管理密码后使用 AI 评价。</span>
-            <button id="aiAuthOpenBtn" type="button">验证管理密码</button>
-          </div>
           <div id="aiConfigSummary" class="ai-config-summary" hidden>
             <div>
               <strong id="aiConfigSummaryTitle">AI 已配置</strong>
               <span id="aiConfigSummaryMeta"></span>
             </div>
-            <button id="aiModifyApiBtn" type="button">修改API</button>
           </div>
           <div id="aiConfig" class="ai-config" hidden>
-            <label>
-              <span>API URL</span>
-              <input id="aiBaseUrlInput" type="url" placeholder="https://api.openai.com/v1" />
-            </label>
-            <label>
-              <span>API Key</span>
-              <input id="aiKeyInput" type="password" autocomplete="off" placeholder="API Key" />
-            </label>
-            <div id="aiHttpWarning" class="ai-warning" hidden>当前使用 http://，Key 会以非 TLS 方式发送</div>
-            <div class="ai-actions">
-              <button id="aiSaveFetchBtn" type="button">保存并获取模型</button>
-              <button id="aiFetchModelsBtn" type="button">刷新模型</button>
+            <div id="aiApiFields" class="ai-api-fields">
+              <label>
+                <span>API URL</span>
+                <input id="aiBaseUrlInput" type="url" placeholder="https://api.openai.com/v1" />
+              </label>
+              <label>
+                <span>API Key</span>
+                <input id="aiKeyInput" type="password" autocomplete="off" placeholder="API Key" />
+              </label>
+              <div id="aiHttpWarning" class="ai-warning" hidden>当前使用 http://，Key 会以非 TLS 方式发送</div>
+              <div class="ai-actions">
+                <button id="aiSaveFetchBtn" type="button">保存并获取模型</button>
+              </div>
             </div>
-            <label>
-              <span>模型</span>
-              <select id="aiModelSelect">
-                <option value="">先获取模型</option>
-              </select>
-            </label>
-            <label>
-              <span>分析风格</span>
-              <select id="aiPersonaSelect"></select>
-            </label>
-            <label id="aiCustomPersonaWrap" hidden>
-              <span>自定义风格</span>
-              <textarea id="aiCustomPersonaInput" maxlength="800" rows="3" placeholder="例如：更关注回撤、仓位和长期持有体验"></textarea>
-            </label>
-            <div class="ai-actions">
-              <button id="aiSaveConfigBtn" type="button">保存设置</button>
+            <div id="aiModelFields" class="ai-model-fields">
+              <label>
+                <span>模型</span>
+                <select id="aiModelSelect">
+                  <option value="">先获取模型</option>
+                </select>
+              </label>
+              <div class="ai-actions ai-refresh-action">
+                <button id="aiFetchModelsBtn" type="button">刷新模型</button>
+              </div>
+              <label>
+                <span>分析风格</span>
+                <select id="aiPersonaSelect"></select>
+              </label>
+              <label id="aiCustomPersonaWrap" hidden>
+                <span>自定义风格</span>
+                <textarea id="aiCustomPersonaInput" maxlength="800" rows="3" placeholder="例如：更关注回撤、仓位和长期持有体验"></textarea>
+              </label>
+              <div class="ai-actions">
+                <button id="aiSaveConfigBtn" type="button">保存设置</button>
+              </div>
             </div>
           </div>
           <div id="aiError" class="ai-error" hidden></div>
@@ -197,6 +199,6 @@
       </form>
     </div>
 
-    <script src="/static/compare_app.js?v=20260603c"></script>
+    <script src="/static/compare_app.js?v=20260603d"></script>
   </body>
 </html>
