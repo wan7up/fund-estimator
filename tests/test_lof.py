@@ -359,8 +359,13 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert first["status"] == "sent"
     assert second["status"] == "skipped_duplicate_daily_summary"
     assert len(sent_texts) == 1
-    assert "LOF套利机会早报" in sent_texts[0]
+    assert "【LOF套利机会提醒】2026-05-29 10:05" in sent_texts[0]
     assert "161128" in sent_texts[0]
+    assert "操作建议：" in sent_texts[0]
+    assert "成交额：" in sent_texts[0]
+    assert "估算溢价：" in sent_texts[0]
+    assert "官方净值溢价：" in sent_texts[0]
+    assert "申购限额" in sent_texts[0]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_daily_summary_date"] == "2026-05-29"
 

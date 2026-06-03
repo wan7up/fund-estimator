@@ -520,64 +520,78 @@ class LofNoticeService:
 
     @staticmethod
     def _format_candidate(item: LofPremiumItem, *, reason: str) -> str:
-        est = "--" if item.estimated_premium_pct is None else f"{item.estimated_premium_pct:+.2f}%"
-        off = "--" if item.official_premium_pct is None else f"{item.official_premium_pct:+.2f}%"
-        price = "--" if item.exchange_price is None else f"{item.exchange_price:.3f}"
-        turnover = "--" if item.exchange_turnover_yuan is None else f"{item.exchange_turnover_yuan / 10000:.0f}万"
-        risks = "；".join(item.risks[:4]) if item.risks else "无"
-        return (
-            f"LOF机会 {item.code} {item.name}\n"
-            f"触发: {reason} / {item.direction} / {item.level}\n"
-            f"估算溢价: {est}  官方溢价: {off}\n"
-            f"场内价: {price}  成交额: {turnover}\n"
-            f"申购: {item.purchase_status}  赎回: {item.redemption_status}\n"
-            f"风险: {risks}\n"
-            "仅供研究监控，不构成投资建议。"
-        )
+        return LofNoticeService._format_alert([item], now=datetime.now(UTC))
 
     @staticmethod
     def _format_summary(items: list[LofPremiumItem], *, response: LofOpportunityResponse) -> str:
-        lines = [
-            f"LOF机会汇总 {response.scanned_at.astimezone(MARKET_TZ).strftime('%H:%M:%S')}",
-            f"阈值: {response.normal_threshold_pct:.1f}% / {response.strong_threshold_pct:.1f}%",
-        ]
-        for item in items:
-            est = "--" if item.estimated_premium_pct is None else f"{item.estimated_premium_pct:+.2f}%"
-            off = "--" if item.official_premium_pct is None else f"{item.official_premium_pct:+.2f}%"
-            turnover = "--" if item.exchange_turnover_yuan is None else f"{item.exchange_turnover_yuan / 10000:.0f}万"
-            lines.append(f"{item.code} {item.name[:12]} 估:{est} 官:{off} 成交:{turnover} {item.direction}/{item.level}")
-        lines.append("仅供研究监控，不构成投资建议。")
-        return "\n".join(lines)
+        return LofNoticeService._format_alert(items, now=response.scanned_at)
 
     @staticmethod
     def _format_daily_summary(items: list[LofPremiumItem], *, response: LofOpportunityResponse, now: datetime) -> str:
-        local_now = now.astimezone(MARKET_TZ)
-        lines = [
-            f"LOF套利机会早报 {local_now.strftime('%Y-%m-%d %H:%M')}",
-            f"扫描池: {len(response.items)}  可操作: {len(items)}",
-        ]
         if not items:
-            lines.extend(
+            local_now = now.astimezone(MARKET_TZ)
+            return "\n".join(
                 [
-                    "当前暂无可操作机会。",
+                    f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
+                    "当前暂无可操作套利机会。",
+                    f"扫描池：{len(response.items)}只",
                     "主要过滤条件：估算溢价达到阈值、成交额充足、申购/赎回未卡住、代理行情可用。",
                 ]
             )
-        else:
-            lines.append("可操作代码：")
-            for item in items[:10]:
-                est = "--" if item.estimated_premium_pct is None else f"{item.estimated_premium_pct:+.2f}%"
-                ref = "--" if item.reference_change_pct is None else f"{item.reference_change_pct:+.2f}%"
-                turnover = "--" if item.exchange_turnover_yuan is None else f"{item.exchange_turnover_yuan / 10000:.0f}万"
-                limit = "--" if item.daily_purchase_limit_yuan is None else f"{item.daily_purchase_limit_yuan:.0f}元"
-                lines.append(
-                    f"{item.code} {item.name[:14]} 估:{est} 标的:{ref} 成交:{turnover} 限额:{limit}"
-                )
-            if len(items) > 10:
-                lines.append(f"另有 {len(items) - 10} 只未列出，请打开监控页查看。")
-            lines.append("说明：优先看估算溢价；参考标的期间涨幅用于把官方净值滚动到盘中。")
-        lines.append("仅供研究监控，不构成投资建议。")
+        return LofNoticeService._format_alert(items[:10], now=now)
+
+    @staticmethod
+    def _format_alert(items: list[LofPremiumItem], *, now: datetime) -> str:
+        local_now = now.astimezone(MARKET_TZ)
+        lines = [f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}"]
+        for index, item in enumerate(items):
+            if index:
+                lines.append("")
+            lines.extend(
+                [
+                    f"{item.code} {item.name}",
+                    f"操作建议：{LofNoticeService._action_advice(item)}",
+                    f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
+                    f"官方净值溢价：{LofNoticeService._format_pct(item.official_premium_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
+                ]
+            )
         return "\n".join(lines)
+
+    @staticmethod
+    def _action_advice(item: LofPremiumItem) -> str:
+        if not item.actionable:
+            return "当前未满足可操作条件，建议仅观察，不做套利动作。"
+        if item.direction == "premium":
+            if item.purchase_status == "暂停":
+                return "溢价但申购暂停，建议仅观察。"
+            return "溢价方向，优先确认申购开放、限额和成交额，再评估申购转场内卖出。"
+        if item.direction == "discount":
+            if item.redemption_status == "暂停":
+                return "折价但赎回暂停，建议仅观察。"
+            return "折价方向，优先确认赎回开放和成交额，再评估场内买入并赎回。"
+        return "信号方向不明确，建议仅观察。"
+
+    @staticmethod
+    def _format_pct(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:+.2f}%"
+
+    @staticmethod
+    def _format_money(value: float | None) -> str:
+        if value is None:
+            return "--"
+        if abs(value) >= 100000000:
+            return f"{value / 100000000:.2f}亿"
+        if abs(value) >= 10000:
+            return f"{value / 10000:.0f}万"
+        return f"{value:.0f}元"
+
+    @staticmethod
+    def _format_limit(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return LofNoticeService._format_money(value)
 
     def _is_after_daily_summary_time(self, local_now: datetime, summary_time: str | None = None) -> bool:
         return local_now.time() >= self._parse_hhmm(summary_time or self.effective_daily_summary_time())
