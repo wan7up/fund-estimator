@@ -240,8 +240,13 @@ async function loadWatchlist() {
 function syncNoticeInputs(status) {
   els.noticeEnabledInput.checked = Boolean(status.enabled);
   els.noticeTimeInput.value = status.daily_summary_time || "10:00";
-  els.ipoReminderToggleBtn.textContent = status.ipo_reminder_enabled ? "打新提醒开" : "打新提醒关";
-  els.ipoReminderToggleBtn.setAttribute("aria-pressed", status.ipo_reminder_enabled ? "true" : "false");
+  renderIpoReminderToggle(Boolean(status.ipo_reminder_enabled));
+}
+
+function renderIpoReminderToggle(enabled, busy = false) {
+  els.ipoReminderToggleBtn.textContent = busy ? "打新保存中" : `打新提醒${enabled ? "开" : "关"}`;
+  els.ipoReminderToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  els.ipoReminderToggleBtn.classList.toggle("active", enabled);
 }
 
 function renderNoticeStatus(prefix = "") {
@@ -274,7 +279,7 @@ function renderNoticeStatus(prefix = "") {
   els.noticeConnectBtn.textContent = status.connected || state.noticeConnectPending ? "重新接入" : "接入飞书";
   els.noticeDisconnectBtn.hidden = !status.connected;
   els.noticeDisconnectBtn.disabled = state.noticeInFlight;
-  els.ipoReminderToggleBtn.disabled = state.noticeInFlight;
+  els.ipoReminderToggleBtn.disabled = false;
   els.noticeTestBtn.disabled = state.noticeInFlight || !status.target_set || !status.app_configured;
 }
 
@@ -308,10 +313,17 @@ async function saveNoticeSettings(prefix = "已自动保存", overrides = {}) {
     saved = true;
   } catch (error) {
     els.noticeStatusText.textContent = `保存失败：${error.message}`;
+    if (state.noticeStatus) syncNoticeInputs(state.noticeStatus);
   } finally {
     state.noticeInFlight = false;
     if (saved) renderNoticeStatus(prefix);
   }
+}
+
+async function toggleIpoReminder() {
+  const next = !Boolean(state.noticeStatus?.ipo_reminder_enabled);
+  renderIpoReminderToggle(next, true);
+  await saveNoticeSettings(next ? "打新提醒已开启" : "打新提醒已关闭", { ipo_reminder_enabled: next });
 }
 
 async function connectFeishuNotice() {
@@ -860,11 +872,6 @@ els.noticeTimeInput.addEventListener("change", () => {
   saveNoticeSettings("通知时间已更新");
 });
 
-els.ipoReminderToggleBtn.addEventListener("click", () => {
-  const next = !Boolean(state.noticeStatus?.ipo_reminder_enabled);
-  saveNoticeSettings(next ? "打新提醒已开启" : "打新提醒已关闭", { ipo_reminder_enabled: next });
-});
-
 els.noticeTestBtn.addEventListener("click", () => {
   sendNoticeTest();
 });
@@ -900,6 +907,15 @@ els.rows.addEventListener("click", handleItemClick);
 els.cards.addEventListener("click", handleItemClick);
 
 document.addEventListener("click", (event) => {
+  const ipoButton = event.target.closest("#ipoReminderToggleBtn");
+  if (ipoButton) {
+    event.preventDefault();
+    toggleIpoReminder().catch((error) => {
+      els.noticeStatusText.textContent = `打新提醒切换失败：${error.message}`;
+      if (state.noticeStatus) syncNoticeInputs(state.noticeStatus);
+    });
+    return;
+  }
   if (!event.target.closest(".search")) {
     els.searchResults.classList.remove("active");
   }

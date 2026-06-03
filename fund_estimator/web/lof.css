@@ -294,6 +294,13 @@ button:hover:not(:disabled) {
   font-weight: 700;
 }
 
+.secondary-btn.active,
+.secondary-btn[aria-pressed="true"] {
+  border-color: rgba(22, 163, 74, 0.42);
+  background: #ecfdf3;
+  color: #166534;
+}
+
 .notice-status-text {
   min-width: 0;
   color: var(--muted);
