@@ -1,19 +1,11 @@
 [Unit]
 Description=Fund estimator LOF daily Feishu notice
-After=network-online.target
+Requires=docker.service
+After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=fundestimator
-Group=fundestimator
 WorkingDirectory=/opt/fund-estimator
-Environment=FUND_ESTIMATOR_FORCE_MOCK=0
-Environment=FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK=0
-Environment=FUND_ESTIMATOR_DB=/var/lib/fund-estimator/fund_estimator.sqlite3
-Environment=LOF_NOTICE_DIR=/var/lib/fund-estimator
-Environment=LOF_NOTICE_ENABLED=1
-Environment=LOF_NOTICE_DAILY_SUMMARY_TIME=10:00
-Environment=LOF_NOTICE_SEND_EMPTY_DAILY_SUMMARY=1
-EnvironmentFile=-/etc/fund-estimator/lof-notice.env
-ExecStart=/opt/fund-estimator/.venv/bin/python -m fund_estimator.lof_worker daily-summary --limit 120
+TimeoutStartSec=300
+ExecStart=/usr/bin/docker compose exec -T fund-tools python -m fund_estimator.lof_worker daily-summary --limit 120
