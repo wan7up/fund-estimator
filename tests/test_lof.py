@@ -413,6 +413,8 @@ def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
             item("160003", 3.0, 9_000_000, "暂停"),
             item("160004", 4.0, 100_000),
             item("160005", 0.9, 10_000_000),
+            item("160006", 5.0, 20_000_000, "unknown"),
+            item("160007", 1.1, 4_000_000, "限制大额"),
         ],
     )
 
@@ -422,10 +424,12 @@ def test_lof_notice_filters_premium_by_purchase_status_and_turnover(tmp_path):
     assert len(sent_texts) == 1
     assert "160002 测试LOF160002" in sent_texts[0]
     assert "160001 测试LOF160001" in sent_texts[0]
+    assert "160007 测试LOF160007" in sent_texts[0]
     assert "\n\n160001 测试LOF160001" in sent_texts[0]
     assert "160003" not in sent_texts[0]
     assert "160004" not in sent_texts[0]
     assert "160005" not in sent_texts[0]
+    assert "160006" not in sent_texts[0]
     assert "成交额：800万；估算溢价：+2.50%" in sent_texts[0]
     assert "操作建议：溢价超过1%，成交额达标；优先确认申购开放、限额和费率，再评估申购转场内卖出。" in sent_texts[0]
 

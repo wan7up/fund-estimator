@@ -21,6 +21,7 @@ COOLDOWN_SECONDS = 30 * 60
 SUMMARY_INTERVAL_SECONDS = 10 * 60
 NOTICE_PREMIUM_THRESHOLD_PCT = 1.0
 DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
+NOTICE_PURCHASE_STATUSES = {"开放", "限制大额"}
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
 CONNECT_STATE_TTL_SECONDS = 10 * 60
 FEISHU_ACCOUNTS_BASE = "https://accounts.feishu.cn"
@@ -486,7 +487,7 @@ class LofNoticeService:
         premium = LofNoticeService._notice_premium_pct(item)
         if premium is None or premium <= NOTICE_PREMIUM_THRESHOLD_PCT:
             return False
-        if item.purchase_status == "暂停":
+        if item.purchase_status not in NOTICE_PURCHASE_STATUSES:
             return False
         if item.exchange_turnover_yuan is None or item.exchange_turnover_yuan < min_turnover_yuan:
             return False
@@ -575,7 +576,7 @@ class LofNoticeService:
                     f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
                     "当前暂无可操作套利机会。",
                     f"扫描池：{len(response.items)}只",
-                    f"主要过滤条件：溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%、申购未暂停、成交额达到{LofNoticeService._format_money(response.min_turnover_yuan)}。",
+                    f"主要过滤条件：溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%、申购开放或限购、成交额达到{LofNoticeService._format_money(response.min_turnover_yuan)}。",
                 ]
             )
         return LofNoticeService._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
