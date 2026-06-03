@@ -25,10 +25,10 @@ class DummyEstimator:
         ]
 
     async def get_profile(self, code: str) -> FundProfile:
-        if code == "501046":
+        if code in {"501046", "501062"}:
             return FundProfile(
                 code=code,
-                name="财通多策略福鑫定开混合",
+                name="南方瑞合定开混合(LOF)" if code == "501062" else "财通多策略福鑫定开混合",
                 fund_type="混合型-灵活",
                 nav_date=date(2026, 5, 29),
                 last_nav=1.0,
@@ -62,7 +62,7 @@ class DummyMarketSource:
         return {
             code: LofMarketQuote(
                 code=code,
-                name="财通福鑫" if code == "501046" else "新机会LOF" if code == "160999" else f"核心LOF{code}",
+                name="瑞合LOF" if code == "501062" else "财通福鑫" if code == "501046" else "新机会LOF" if code == "160999" else f"核心LOF{code}",
                 latest_price=1.08 if code == "160999" else 1.05 if code == "161128" else 1.01,
                 previous_close=1.0,
                 change_pct=5.0,
@@ -75,7 +75,7 @@ class DummyMarketSource:
         }
 
     async def get_all_quotes(self):
-        return await self.get_quotes(["160999", "160998", "501046"])
+        return await self.get_quotes(["160999", "160998", "501046", "501062"])
 
 
 class FailingMarketSource:
@@ -212,7 +212,9 @@ def test_lof_scan_excludes_closed_end_funds_from_display_pool(tmp_path):
 
     response = __import__("asyncio").run(service.get_opportunities(limit=200))
 
-    assert "501046" not in {row.code for row in response.items}
+    codes = {row.code for row in response.items}
+    assert "501046" not in codes
+    assert "501062" not in codes
 
 
 def test_sina_lof_quote_parses_hot_hong_kong_us_internet_quote():

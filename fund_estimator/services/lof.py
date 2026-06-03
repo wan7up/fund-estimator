@@ -833,8 +833,8 @@ class LofMonitorService:
     ) -> bool:
         if code in CORE_LOF_BY_CODE:
             return True
-        if profile is not None and looks_like_lof_fund(profile.code, profile.name, profile.fund_type):
-            return True
+        if profile is not None:
+            return looks_like_lof_fund(profile.code, profile.name, profile.fund_type)
         if quote is not None and looks_like_lof_name(quote.name):
             return True
         return False
