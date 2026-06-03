@@ -9,6 +9,7 @@ const state = {
     loading: false,
     commentary: null,
     expanded: false,
+    editingConfig: false,
   },
 };
 
@@ -109,8 +110,18 @@ const els = {
   aiStatusText: document.querySelector("#aiStatusText"),
   aiGenerateBtn: document.querySelector("#aiGenerateBtn"),
   aiDisabled: document.querySelector("#aiDisabled"),
+  aiAuthPrompt: document.querySelector("#aiAuthPrompt"),
+  aiAuthOpenBtn: document.querySelector("#aiAuthOpenBtn"),
+  aiConfigSummary: document.querySelector("#aiConfigSummary"),
+  aiConfigSummaryTitle: document.querySelector("#aiConfigSummaryTitle"),
+  aiConfigSummaryMeta: document.querySelector("#aiConfigSummaryMeta"),
+  aiModifyApiBtn: document.querySelector("#aiModifyApiBtn"),
   aiLoginForm: document.querySelector("#aiLoginForm"),
+  aiPasswordModal: document.querySelector("#aiPasswordModal"),
   aiPasswordInput: document.querySelector("#aiPasswordInput"),
+  aiPasswordCloseBtn: document.querySelector("#aiPasswordCloseBtn"),
+  aiPasswordCancelBtn: document.querySelector("#aiPasswordCancelBtn"),
+  aiPasswordError: document.querySelector("#aiPasswordError"),
   aiConfig: document.querySelector("#aiConfig"),
   aiBaseUrlInput: document.querySelector("#aiBaseUrlInput"),
   aiKeyInput: document.querySelector("#aiKeyInput"),
@@ -250,6 +261,30 @@ function setAiError(message) {
   els.aiError.textContent = message;
 }
 
+function setAiPasswordError(message) {
+  if (!message) {
+    els.aiPasswordError.hidden = true;
+    els.aiPasswordError.textContent = "";
+    return;
+  }
+  els.aiPasswordError.hidden = false;
+  els.aiPasswordError.textContent = message;
+}
+
+function openAiPasswordModal() {
+  els.aiPasswordModal.hidden = false;
+  els.aiLoginForm.hidden = false;
+  els.aiPasswordInput.value = "";
+  setAiPasswordError("");
+  setTimeout(() => els.aiPasswordInput.focus(), 0);
+}
+
+function closeAiPasswordModal() {
+  els.aiPasswordModal.hidden = true;
+  els.aiPasswordInput.value = "";
+  setAiPasswordError("");
+}
+
 function updateAiHttpWarning() {
   const value = els.aiBaseUrlInput.value.trim().toLowerCase();
   els.aiHttpWarning.hidden = !value.startsWith("http://");
@@ -287,6 +322,21 @@ function syncAiInputs(status) {
   updateAiHttpWarning();
 }
 
+function aiPersonaLabel(status) {
+  const persona = (status?.personas || []).find((item) => item.id === status?.persona_id);
+  return persona?.label || status?.persona_id || "默认研究员";
+}
+
+function renderAiConfigSummary(status) {
+  els.aiConfigSummaryTitle.textContent = status.selected_model || "AI 已配置";
+  const parts = [
+    status.base_url || DEFAULT_AI_BASE_URL,
+    aiPersonaLabel(status),
+    status.api_key_masked ? `Key ${status.api_key_masked}` : "Key 已保存",
+  ];
+  els.aiConfigSummaryMeta.textContent = parts.filter(Boolean).join(" · ");
+}
+
 function aiCompactStatus(status) {
   if (!status) return "检查配置中";
   if (!status.enabled) return "可选 AI 评价：服务器未启用";
@@ -306,7 +356,8 @@ function renderAiPanel() {
   els.aiGenerateBtn.hidden = !expanded;
   els.aiGenerateBtn.disabled = busy || !state.result || !status?.enabled || !status.authenticated || !status.configured;
   els.aiDisabled.hidden = true;
-  els.aiLoginForm.hidden = true;
+  els.aiAuthPrompt.hidden = true;
+  els.aiConfigSummary.hidden = true;
   els.aiConfig.hidden = true;
   els.aiSaveFetchBtn.disabled = busy;
   els.aiFetchModelsBtn.disabled = busy || !status?.authenticated;
@@ -325,17 +376,28 @@ function renderAiPanel() {
     els.aiDisabled.hidden = false;
   } else if (!status.authenticated) {
     els.aiStatusText.textContent = "需要验证";
-    els.aiLoginForm.hidden = false;
+    els.aiAuthPrompt.hidden = false;
   } else {
-    els.aiConfig.hidden = false;
-    els.aiStatusText.textContent = status.configured ? `${status.selected_model} · 已配置` : "待选择模型";
+    if (!status.configured) {
+      state.ai.editingConfig = true;
+    }
+    if (status.configured && !state.ai.editingConfig) {
+      els.aiConfigSummary.hidden = false;
+      renderAiConfigSummary(status);
+      els.aiStatusText.textContent = `${status.selected_model} · 已配置`;
+    } else {
+      els.aiConfig.hidden = false;
+      els.aiStatusText.textContent = status.configured ? "修改API设置" : "待配置模型";
+    }
   }
 
   if (state.ai.commentary) {
     els.aiOutput.classList.remove("empty");
+    els.aiOutput.hidden = false;
     els.aiOutput.textContent = state.ai.commentary.commentary || "";
   } else {
     els.aiOutput.classList.add("empty");
+    els.aiOutput.hidden = true;
     els.aiOutput.textContent = state.result ? "可基于当前规则结果生成 AI 评价" : "完成基金对比后，可生成 AI 评价";
   }
 }
@@ -344,6 +406,11 @@ async function loadAiStatus() {
   try {
     const status = await api("/api/compare/ai/status");
     state.ai.status = status;
+    if (!status.authenticated) {
+      state.ai.editingConfig = false;
+    } else if (!status.configured) {
+      state.ai.editingConfig = true;
+    }
     syncAiInputs(status);
     setAiError("");
   } catch (error) {
@@ -377,6 +444,7 @@ async function saveAiConfig(fetchAfterSave = false) {
       body: JSON.stringify(collectAiConfigPayload()),
     });
     state.ai.status = status;
+    state.ai.editingConfig = !status.configured;
     syncAiInputs(status);
     if (fetchAfterSave) {
       const data = await api("/api/compare/ai/models");
@@ -422,11 +490,13 @@ async function loginAi(event) {
       method: "POST",
       body: JSON.stringify({ password }),
     });
-    els.aiPasswordInput.value = "";
+    closeAiPasswordModal();
     state.ai.status = status;
+    state.ai.editingConfig = !status.configured;
     syncAiInputs(status);
+    setAiError("");
   } catch (error) {
-    setAiError(error.message);
+    setAiPasswordError(error.message);
   } finally {
     state.ai.loading = false;
     renderAiPanel();
@@ -809,9 +879,35 @@ els.compareBtn.addEventListener("click", () => {
 els.aiEnableToggle.addEventListener("change", () => {
   state.ai.expanded = els.aiEnableToggle.checked;
   renderAiPanel();
+  if (state.ai.expanded && state.ai.status?.enabled && !state.ai.status.authenticated) {
+    openAiPasswordModal();
+  }
+});
+
+els.aiAuthOpenBtn.addEventListener("click", () => {
+  openAiPasswordModal();
+});
+
+els.aiPasswordCloseBtn.addEventListener("click", () => {
+  closeAiPasswordModal();
+});
+
+els.aiPasswordCancelBtn.addEventListener("click", () => {
+  closeAiPasswordModal();
 });
 
 els.aiLoginForm.addEventListener("submit", loginAi);
+
+els.aiPasswordModal.addEventListener("click", (event) => {
+  if (event.target === els.aiPasswordModal) {
+    closeAiPasswordModal();
+  }
+});
+
+els.aiModifyApiBtn.addEventListener("click", () => {
+  state.ai.editingConfig = true;
+  renderAiPanel();
+});
 
 els.aiBaseUrlInput.addEventListener("input", updateAiHttpWarning);
 

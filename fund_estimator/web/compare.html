@@ -7,7 +7,7 @@
     <title>基金对比器</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-20260603.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-20260603.png" />
-    <link rel="stylesheet" href="/static/compare.css?v=20260603b" />
+    <link rel="stylesheet" href="/static/compare.css?v=20260603c" />
   </head>
   <body>
     <header class="topbar">
@@ -67,10 +67,17 @@
         </div>
         <div id="aiBody" class="ai-body" hidden>
           <div id="aiDisabled" class="ai-state" hidden>AI 功能未启用</div>
-          <form id="aiLoginForm" class="ai-login" hidden>
-            <input id="aiPasswordInput" type="password" autocomplete="current-password" placeholder="AI 管理密码" />
-            <button type="submit">验证</button>
-          </form>
+          <div id="aiAuthPrompt" class="ai-inline-row" hidden>
+            <span>需要验证管理密码后使用 AI 评价。</span>
+            <button id="aiAuthOpenBtn" type="button">验证管理密码</button>
+          </div>
+          <div id="aiConfigSummary" class="ai-config-summary" hidden>
+            <div>
+              <strong id="aiConfigSummaryTitle">AI 已配置</strong>
+              <span id="aiConfigSummaryMeta"></span>
+            </div>
+            <button id="aiModifyApiBtn" type="button">修改API</button>
+          </div>
           <div id="aiConfig" class="ai-config" hidden>
             <label>
               <span>API URL</span>
@@ -104,7 +111,7 @@
             </div>
           </div>
           <div id="aiError" class="ai-error" hidden></div>
-          <div id="aiOutput" class="ai-output empty">完成基金对比后，可生成 AI 评价</div>
+          <div id="aiOutput" class="ai-output empty" hidden>完成基金对比后，可生成 AI 评价</div>
         </div>
       </section>
 
@@ -175,6 +182,21 @@
       </section>
     </main>
 
-    <script src="/static/compare_app.js?v=20260603b"></script>
+    <div id="aiPasswordModal" class="modal-backdrop" hidden>
+      <form id="aiLoginForm" class="ai-modal" role="dialog" aria-modal="true" aria-labelledby="aiPasswordTitle">
+        <div class="ai-modal-head">
+          <h2 id="aiPasswordTitle">验证AI管理密码</h2>
+          <button id="aiPasswordCloseBtn" class="modal-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="aiPasswordInput" type="password" autocomplete="current-password" placeholder="输入管理密码" />
+        <div id="aiPasswordError" class="ai-error" hidden></div>
+        <div class="ai-modal-actions">
+          <button id="aiPasswordCancelBtn" type="button">取消</button>
+          <button class="primary-btn" type="submit">验证</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="/static/compare_app.js?v=20260603c"></script>
   </body>
 </html>
