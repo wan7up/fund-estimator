@@ -1,15 +1,15 @@
 const TOOLS = {
   estimate: {
     path: "/estimate",
-    title: "场外估值",
-  },
-  arbitrage: {
-    path: "/arbitrage",
-    title: "套利监控",
+    title: "实时估值",
   },
   compare: {
     path: "/compare",
     title: "基金对比",
+  },
+  arbitrage: {
+    path: "/arbitrage",
+    title: "套利提醒",
   },
 };
 
