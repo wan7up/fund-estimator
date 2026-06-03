@@ -29,6 +29,7 @@ from fund_estimator.services.lof_config import (
     CORE_CROSS_BORDER_LOFS,
     CORE_LOF_BY_CODE,
     CoreLof,
+    looks_like_lof_code,
     looks_like_lof_fund,
     looks_like_lof_name,
 )
@@ -803,7 +804,7 @@ class LofMonitorService:
             if quote.code not in base_set
             and quote.latest_price is not None
             and quote.latest_price > 0
-            and looks_like_lof_name(quote.name)
+            and (looks_like_lof_code(quote.code) or looks_like_lof_name(quote.name))
         ]
         candidates.sort(key=lambda quote: (-(quote.turnover_yuan or 0), quote.code))
 
