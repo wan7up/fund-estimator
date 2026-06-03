@@ -214,11 +214,10 @@ button:hover:not(:disabled) {
 }
 
 .notice-settings-bar {
-  display: flex;
+  display: grid;
   min-height: 48px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -231,6 +230,7 @@ button:hover:not(:disabled) {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  width: 100%;
 }
 
 .notice-switch,
@@ -301,8 +301,12 @@ button:hover:not(:disabled) {
   color: #166534;
 }
 
-#ipoReminderToggleBtn {
-  margin-right: 8px;
+.notice-connect-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .notice-status-text {
@@ -826,7 +830,6 @@ small {
   }
 
   .notice-settings-bar {
-    display: grid;
     gap: 8px;
     padding: 10px;
   }
@@ -834,6 +837,12 @@ small {
   .notice-settings-main {
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .notice-connect-actions {
+    flex: 1 1 100%;
+    gap: 8px;
+    margin-left: 0;
   }
 
   .notice-switch {
