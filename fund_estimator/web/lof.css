@@ -301,6 +301,10 @@ button:hover:not(:disabled) {
   color: #166534;
 }
 
+#ipoReminderToggleBtn {
+  margin-right: 8px;
+}
+
 .notice-status-text {
   min-width: 0;
   color: var(--muted);

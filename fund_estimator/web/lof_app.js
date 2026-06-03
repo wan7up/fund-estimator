@@ -245,7 +245,8 @@ function syncNoticeInputs(status) {
 }
 
 function renderIpoReminderToggle(enabled, busy = false) {
-  els.ipoReminderToggleBtn.textContent = busy ? "打新保存中" : `打新提醒${enabled ? "开" : "关"}`;
+  els.ipoReminderToggleBtn.textContent = "打新提醒";
+  els.ipoReminderToggleBtn.disabled = busy;
   els.ipoReminderToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
   els.ipoReminderToggleBtn.classList.toggle("active", enabled);
 }
