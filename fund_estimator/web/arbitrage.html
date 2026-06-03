@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <base target="_top" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>基金套利监控</title>
+    <title>LOF套利监控/打新提醒</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-20260603.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-20260603.png" />
-    <link rel="stylesheet" href="/static/lof.css?v=20260603d" />
+    <link rel="stylesheet" href="/static/lof.css?v=20260603e" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
-        <strong>基金套利监控</strong>
+        <strong>LOF套利监控/打新提醒</strong>
         <span id="sourceBadge">连接数据源...</span>
       </div>
       <form id="lofSearchForm" class="search">
@@ -55,16 +55,16 @@
             <span class="switch-track" aria-hidden="true"><span></span></span>
             <strong>飞书通知</strong>
           </label>
-          <label class="notice-time">
+          <label class="notice-time" hidden data-notice-dependent>
             <span>每日</span>
             <input id="noticeTimeInput" type="time" value="10:00" />
           </label>
-          <button id="ipoReminderToggleBtn" class="secondary-btn" type="button" aria-pressed="false">打新提醒关</button>
-          <button id="noticeConnectBtn" class="secondary-btn" type="button">接入飞书</button>
-          <button id="noticeDisconnectBtn" class="secondary-btn" type="button" hidden>断开飞书</button>
-          <button id="noticeTestBtn" class="secondary-btn" type="button">测试</button>
+          <button id="ipoReminderToggleBtn" class="secondary-btn" type="button" aria-pressed="false" hidden data-notice-dependent>打新提醒关</button>
+          <button id="noticeConnectBtn" class="secondary-btn" type="button" hidden data-notice-dependent>接入飞书</button>
+          <button id="noticeDisconnectBtn" class="secondary-btn" type="button" hidden data-notice-dependent>断开飞书</button>
+          <button id="noticeTestBtn" class="secondary-btn" type="button" hidden data-notice-dependent>测试</button>
         </div>
-        <span id="noticeStatusText" class="notice-status-text">读取通知状态...</span>
+        <span id="noticeStatusText" class="notice-status-text" hidden data-notice-dependent></span>
       </section>
       <section id="noticeConnectPanel" class="notice-connect-panel" hidden>
         <div>
@@ -134,6 +134,6 @@
     </main>
 
     <script src="/static/vendor/qrcode.js?v=20260603c"></script>
-    <script src="/static/lof_app.js?v=20260603d"></script>
+    <script src="/static/lof_app.js?v=20260603e"></script>
   </body>
 </html>

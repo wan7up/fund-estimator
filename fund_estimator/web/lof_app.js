@@ -74,6 +74,7 @@ const els = {
   noticeQrBox: document.querySelector("#noticeQrBox"),
   noticeTestBtn: document.querySelector("#noticeTestBtn"),
   noticeStatusText: document.querySelector("#noticeStatusText"),
+  noticeDependents: document.querySelectorAll("[data-notice-dependent]"),
 };
 
 function escapeHtml(value) {
@@ -249,31 +250,49 @@ function renderIpoReminderToggle(enabled, busy = false) {
   els.ipoReminderToggleBtn.classList.toggle("active", enabled);
 }
 
+function compactNoticeTarget(value) {
+  const text = String(value || "").trim();
+  if (text.length <= 12) return text || "--";
+  return `${text.slice(0, 5)}...${text.slice(-5)}`;
+}
+
+function renderNoticeVisibility(enabled) {
+  for (const element of els.noticeDependents) {
+    element.hidden = !enabled || (element === els.noticeDisconnectBtn && !state.noticeStatus?.connected);
+  }
+  if (!enabled) {
+    els.noticeConnectPanel.hidden = true;
+    els.noticeQrBox.innerHTML = "";
+  }
+}
+
 function renderNoticeStatus(prefix = "") {
   const status = state.noticeStatus;
   if (!status) {
-    els.noticeStatusText.textContent = prefix || "读取通知状态...";
+    renderNoticeVisibility(els.noticeEnabledInput.checked);
+    els.noticeStatusText.textContent = prefix || "";
     return;
   }
-  const enabledText = status.enabled ? "已开启" : "已关闭";
+  const noticeEnabled = Boolean(status.enabled);
+  renderNoticeVisibility(noticeEnabled);
+  if (!noticeEnabled) {
+    els.noticeStatusText.textContent = "";
+    return;
+  }
   const targetText = !status.app_configured
     ? "未接入飞书"
     : status.target_set
-      ? `已绑定/${status.target_name || status.target_kind}`
+      ? `已绑定/${compactNoticeTarget(status.target_name || status.target_kind)}`
       : "未接入飞书";
-  const lastText = status.last_status ? `最近:${status.last_status}` : "尚未发送";
-  const ipoText = status.ipo_reminder_enabled ? "打新开" : "打新关";
-  const errorText = status.last_error ? ` · ${status.last_error}` : "";
-  const head = prefix ? `${prefix} · ` : "";
-  const setupText = status.setup_hint ? ` · ${status.setup_hint}` : "";
-  els.noticeStatusText.textContent = `${head}${enabledText} · ${status.daily_summary_time || "10:00"} · ${ipoText} · ${targetText} · ${lastText}${errorText}${setupText}`;
+  const lastText = status.last_status ? `最近：${status.last_status}` : "最近：尚未发送";
+  els.noticeStatusText.textContent = `${targetText} · ${lastText}`;
   if (status.connected) state.noticeConnectPending = false;
   if (!state.noticeConnectPending) {
     els.noticeConnectPanel.hidden = true;
     els.noticeQrBox.innerHTML = "";
   }
   if (state.noticeConnectPending && !status.connected) {
-    els.noticeStatusText.textContent = `${head || ""}等待飞书扫码配置机器人 · 二维码有效期内会自动轮询`;
+    els.noticeStatusText.textContent = "未接入飞书 · 最近：等待扫码";
   }
   els.noticeConnectBtn.disabled = state.noticeInFlight;
   els.noticeConnectBtn.textContent = status.connected || state.noticeConnectPending ? "重新接入" : "接入飞书";
@@ -296,8 +315,10 @@ async function loadNoticeStatus() {
 
 async function saveNoticeSettings(prefix = "已自动保存", overrides = {}) {
   if (state.noticeInFlight) return;
+  const nextEnabled = Boolean(overrides.enabled ?? els.noticeEnabledInput.checked);
+  renderNoticeVisibility(nextEnabled);
   state.noticeInFlight = true;
-  els.noticeStatusText.textContent = "保存通知设置...";
+  els.noticeStatusText.textContent = nextEnabled ? "保存通知设置..." : "";
   let saved = false;
   try {
     const status = await api("/api/lof/notice/settings", {
@@ -314,6 +335,7 @@ async function saveNoticeSettings(prefix = "已自动保存", overrides = {}) {
   } catch (error) {
     els.noticeStatusText.textContent = `保存失败：${error.message}`;
     if (state.noticeStatus) syncNoticeInputs(state.noticeStatus);
+    if (state.noticeStatus) renderNoticeVisibility(Boolean(state.noticeStatus.enabled));
   } finally {
     state.noticeInFlight = false;
     if (saved) renderNoticeStatus(prefix);
@@ -865,7 +887,9 @@ els.refreshBtn.addEventListener("click", () => {
 });
 
 els.noticeEnabledInput.addEventListener("change", () => {
-  saveNoticeSettings(els.noticeEnabledInput.checked ? "通知已开启" : "通知已关闭");
+  const enabled = els.noticeEnabledInput.checked;
+  renderNoticeVisibility(enabled);
+  saveNoticeSettings(enabled ? "通知已开启" : "通知已关闭", { enabled });
 });
 
 els.noticeTimeInput.addEventListener("change", () => {
