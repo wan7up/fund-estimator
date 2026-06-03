@@ -11,6 +11,7 @@ services:
       FUND_ESTIMATOR_DB: /app/data/fund_estimator.sqlite3
       FUND_ESTIMATOR_BACKGROUND_SCAN: "0"
       FUND_ESTIMATOR_LOF_NOTICE_SCHEDULER: "1"
+      FUND_ESTIMATOR_COMPARE_AI_PASSWORD: ${FUND_ESTIMATOR_COMPARE_AI_PASSWORD:-}
     volumes:
       - ./data:/app/data
 
