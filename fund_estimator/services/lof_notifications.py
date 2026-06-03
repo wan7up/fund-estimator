@@ -488,7 +488,12 @@ class LofNoticeService:
     def should_run_daily_summary(self, now: datetime | None = None) -> bool:
         now = now or datetime.now(UTC)
         local = now.astimezone(MARKET_TZ)
-        return local.weekday() < 5 and self._is_after_daily_summary_time(local, self.effective_daily_summary_time())
+        if local.weekday() >= 5:
+            return False
+        state = read_json(self.config.state_path, {})
+        if state.get("last_daily_summary_date") == local.date().isoformat():
+            return False
+        return self._is_after_daily_summary_time(local, self.effective_daily_summary_time(state))
 
     def _settings_from_state(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = state if state is not None else read_json(self.config.state_path, {})

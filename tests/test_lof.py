@@ -480,6 +480,23 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
 
 
+def test_daily_summary_schedule_skips_after_same_day_send(tmp_path):
+    config = LofNoticeConfig(
+        app_id="app",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    state = {
+        "settings": {"daily_summary_time": "10:00"},
+        "last_daily_summary_date": "2026-06-03",
+    }
+    config.state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    assert notice.should_run_daily_summary(datetime(2026, 6, 3, 2, 30, tzinfo=UTC)) is False
+
+
 def test_new_issue_reminder_sends_15_minutes_before_notice_time(tmp_path):
     calendar = NewIssueCalendar(
         target_date=date(2026, 6, 3),

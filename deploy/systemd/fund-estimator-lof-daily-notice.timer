@@ -3,8 +3,8 @@ Description=Check LOF Feishu daily notice schedule
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnUnitActiveSec=1min
+AccuracySec=10s
 Persistent=true
 Unit=fund-estimator-lof-daily-notice.service
 
