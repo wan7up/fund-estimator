@@ -444,13 +444,15 @@ class LofNoticeService:
         self._write_state(state, result, now=now)
         return result
 
-    def send_test(self) -> dict[str, Any]:
-        now = datetime.now(UTC)
-        text = "LOF premium monitor test / LOF 溢价监控测试通知\nstatus: ok"
+    def send_test(self, *, item: LofPremiumItem | None = None, now: datetime | None = None) -> dict[str, Any]:
+        now = now or datetime.now(UTC)
+        text = self._format_alert([item], now=now) if item is not None else self._format_test_fallback(now=now)
         state = read_json(self.config.state_path, {})
         row = {
             "created_at": now.isoformat(timespec="seconds"),
             "kind": "test",
+            "code": item.code if item is not None else None,
+            "name": item.name if item is not None else None,
             **self._send_feishu_openapi(text, state=state),
         }
         append_jsonl(self.config.ledger_path, [row])
@@ -556,6 +558,19 @@ class LofNoticeService:
                 ]
             )
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_test_fallback(*, now: datetime) -> str:
+        local_now = now.astimezone(MARKET_TZ)
+        return "\n".join(
+            [
+                f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
+                "501312 华宝海外科技股票(QDII-LOF)A",
+                "操作建议：测试通知，当前未取得基金实时数据，仅用于验证飞书连接。",
+                "成交额：--；估算溢价：--",
+                "官方净值溢价：--；申购限额--",
+            ]
+        )
 
     @staticmethod
     def _action_advice(item: LofPremiumItem) -> str:

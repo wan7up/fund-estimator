@@ -370,6 +370,36 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert state["last_daily_summary_date"] == "2026-05-29"
 
 
+def test_lof_notice_test_uses_alert_template(tmp_path):
+    service = make_service(tmp_path)
+    item = __import__("asyncio").run(service.get_item("501312"))
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+
+    result = notice.send_test(item=item, now=datetime(2026, 6, 3, 2, 4, tzinfo=UTC))
+
+    assert result["status"] == "sent"
+    assert sent_texts == [
+        "\n".join(
+            [
+                "【LOF套利机会提醒】2026-06-03 10:04",
+                "501312 核心LOF501312",
+                "操作建议：当前未满足可操作条件，建议仅观察，不做套利动作。",
+                "成交额：10万；估算溢价：+0.00%",
+                "官方净值溢价：+1.00%；申购限额1万",
+            ]
+        )
+    ]
+
+
 def test_lof_notice_page_settings_override_env_config(tmp_path):
     service = make_service(tmp_path)
     response = __import__("asyncio").run(service.get_opportunities(limit=20))

@@ -45,8 +45,12 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
     return {"scan": response.model_dump(mode="json"), "notice": notice_result}
 
 
-def send_test_command(_: argparse.Namespace) -> dict[str, Any]:
-    return LofNoticeService().send_test()
+async def send_test_command(_: argparse.Namespace) -> dict[str, Any]:
+    estimator = create_estimator_service()
+    notice = LofNoticeService()
+    monitor = create_lof_monitor_service(estimator, notice_service=notice)
+    item = await monitor.get_item("501312")
+    return notice.send_test(item=item)
 
 
 def main() -> None:
@@ -75,7 +79,7 @@ def main() -> None:
     elif args.command == "daily-summary":
         result = asyncio.run(daily_summary_command(args))
     elif args.command == "send-test":
-        result = send_test_command(args)
+        result = asyncio.run(send_test_command(args))
     else:
         raise SystemExit(f"unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
