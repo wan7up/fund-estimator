@@ -8,6 +8,7 @@ const state = {
     models: [],
     loading: false,
     commentary: null,
+    expanded: false,
   },
 };
 
@@ -103,6 +104,8 @@ const els = {
   warningPanel: document.querySelector("#warningPanel"),
   warningList: document.querySelector("#warningList"),
   aiPanel: document.querySelector("#aiPanel"),
+  aiEnableToggle: document.querySelector("#aiEnableToggle"),
+  aiBody: document.querySelector("#aiBody"),
   aiStatusText: document.querySelector("#aiStatusText"),
   aiGenerateBtn: document.querySelector("#aiGenerateBtn"),
   aiDisabled: document.querySelector("#aiDisabled"),
@@ -284,9 +287,23 @@ function syncAiInputs(status) {
   updateAiHttpWarning();
 }
 
+function aiCompactStatus(status) {
+  if (!status) return "检查配置中";
+  if (!status.enabled) return "可选 AI 评价：服务器未启用";
+  if (!status.authenticated) return "可选 AI 评价：需验证后使用";
+  if (!status.configured) return "可选 AI 评价：待配置模型";
+  return `可选 AI 评价：${status.selected_model || "已配置"}`;
+}
+
 function renderAiPanel() {
   const status = state.ai.status;
   const busy = state.ai.loading;
+  const expanded = Boolean(state.ai.expanded);
+  els.aiPanel.classList.toggle("ai-expanded", expanded);
+  els.aiPanel.classList.toggle("ai-collapsed", !expanded);
+  els.aiEnableToggle.checked = expanded;
+  els.aiBody.hidden = !expanded;
+  els.aiGenerateBtn.hidden = !expanded;
   els.aiGenerateBtn.disabled = busy || !state.result || !status?.enabled || !status.authenticated || !status.configured;
   els.aiDisabled.hidden = true;
   els.aiLoginForm.hidden = true;
@@ -295,6 +312,11 @@ function renderAiPanel() {
   els.aiFetchModelsBtn.disabled = busy || !status?.authenticated;
   els.aiSaveConfigBtn.disabled = busy;
   els.aiGenerateBtn.textContent = busy ? "处理中" : "生成评价";
+
+  if (!expanded) {
+    els.aiStatusText.textContent = aiCompactStatus(status);
+    return;
+  }
 
   if (!status) {
     els.aiStatusText.textContent = "检查配置中";
@@ -782,6 +804,11 @@ for (const tab of els.strategyTabs) {
 
 els.compareBtn.addEventListener("click", () => {
   compareFunds();
+});
+
+els.aiEnableToggle.addEventListener("change", () => {
+  state.ai.expanded = els.aiEnableToggle.checked;
+  renderAiPanel();
 });
 
 els.aiLoginForm.addEventListener("submit", loginAi);

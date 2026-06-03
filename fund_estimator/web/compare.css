@@ -629,10 +629,65 @@ td:first-child {
   color: var(--muted);
 }
 
+.ai-panel {
+  box-shadow: none;
+}
+
+.ai-panel.ai-collapsed {
+  background: #fbfcfe;
+}
+
+.ai-compact-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 46px;
+  padding: 8px 12px;
+}
+
+.ai-panel.ai-expanded .ai-compact-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ai-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+#aiStatusText {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-generate {
+  height: 32px;
+  min-width: 84px;
+  padding: 0 12px;
+}
+
 .ai-body {
   display: grid;
   gap: 12px;
   padding: 14px 16px;
+}
+
+.ai-body[hidden] {
+  display: none;
 }
 
 .ai-state,
@@ -855,6 +910,16 @@ td:first-child {
 
   .methodology-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ai-compact-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .ai-toggle,
+  #aiStatusText {
+    white-space: normal;
   }
 
   .ai-login,

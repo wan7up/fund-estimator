@@ -7,7 +7,7 @@
     <title>基金对比器</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon-20260603.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32-20260603.png" />
-    <link rel="stylesheet" href="/static/compare.css?v=20260603a" />
+    <link rel="stylesheet" href="/static/compare.css?v=20260603b" />
   </head>
   <body>
     <header class="topbar">
@@ -56,15 +56,16 @@
         </div>
       </section>
 
-      <section id="aiPanel" class="compare-panel ai-panel">
-        <div class="panel-head">
-          <div>
-            <h2>AI 评价</h2>
-            <span id="aiStatusText">检查配置中</span>
-          </div>
-          <button id="aiGenerateBtn" class="primary-btn" type="button" disabled>生成评价</button>
+      <section id="aiPanel" class="compare-panel ai-panel ai-collapsed">
+        <div class="ai-compact-head">
+          <label class="ai-toggle">
+            <input id="aiEnableToggle" type="checkbox" />
+            <span>启用AI评测</span>
+          </label>
+          <span id="aiStatusText">检查配置中</span>
+          <button id="aiGenerateBtn" class="primary-btn ai-generate" type="button" disabled hidden>生成评价</button>
         </div>
-        <div class="ai-body">
+        <div id="aiBody" class="ai-body" hidden>
           <div id="aiDisabled" class="ai-state" hidden>AI 功能未启用</div>
           <form id="aiLoginForm" class="ai-login" hidden>
             <input id="aiPasswordInput" type="password" autocomplete="current-password" placeholder="AI 管理密码" />
@@ -174,6 +175,6 @@
       </section>
     </main>
 
-    <script src="/static/compare_app.js?v=20260603a"></script>
+    <script src="/static/compare_app.js?v=20260603b"></script>
   </body>
 </html>
