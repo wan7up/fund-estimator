@@ -26,8 +26,10 @@ body {
   top: 0;
   z-index: 10;
   display: grid;
-  gap: 10px;
-  padding: 10px 12px 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid #dbe3ef;
   background: rgba(248, 250, 252, 0.96);
   backdrop-filter: blur(12px);
@@ -36,18 +38,20 @@ body {
 .shell-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   min-width: 0;
 }
 
 .shell-brand img {
   flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
   border-radius: 7px;
 }
 
 .shell-brand strong {
   overflow: hidden;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.15;
   text-overflow: ellipsis;
@@ -57,17 +61,20 @@ body {
 .tool-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .tool-tab {
-  min-height: 38px;
+  min-width: 0;
+  min-height: 34px;
   border: 1px solid #d3dbe8;
   border-radius: 8px;
+  padding: 0 6px;
   background: #ffffff;
   color: #41506a;
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -80,7 +87,7 @@ body {
 }
 
 .tool-shell {
-  height: calc(100dvh - 96px);
+  height: calc(100dvh - 51px);
   min-height: 0;
 }
 
@@ -104,23 +111,28 @@ body {
 @media (min-width: 760px) {
   .shell-header {
     grid-template-columns: auto minmax(420px, 560px);
-    align-items: center;
     gap: 18px;
-    padding: 12px 18px;
+    padding: 9px 18px;
   }
 
   .tool-shell {
-    height: calc(100dvh - 63px);
+    height: calc(100dvh - 53px);
   }
 }
 
 @media (max-width: 390px) {
   .shell-brand strong {
-    font-size: 17px;
+    font-size: 15px;
+  }
+
+  .shell-brand img {
+    width: 26px;
+    height: 26px;
   }
 
   .tool-tab {
-    min-height: 36px;
-    font-size: 14px;
+    min-height: 32px;
+    padding: 0 4px;
+    font-size: 13px;
   }
 }

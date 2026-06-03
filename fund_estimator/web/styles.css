@@ -26,9 +26,9 @@ body {
 .topbar {
   display: grid;
   grid-template-columns: minmax(280px, auto) minmax(320px, 1fr);
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  padding: 14px 20px;
+  padding: 10px 18px;
   background: #101827;
   color: #fff;
 }
@@ -85,13 +85,13 @@ body {
 .search {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 40px 40px;
-  gap: 8px;
+  grid-template-columns: 1fr 36px 36px;
+  gap: 7px;
 }
 
 .search input {
   width: 100%;
-  height: 38px;
+  height: 36px;
   border: 1px solid #334154;
   border-radius: 6px;
   background: #172235;
@@ -105,7 +105,7 @@ body {
 }
 
 button {
-  height: 38px;
+  height: 36px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fff;
@@ -126,12 +126,12 @@ button:hover {
 }
 
 .icon-btn {
-  width: 40px;
+  width: 36px;
   flex: 0 0 auto;
 }
 
 .search button {
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 700;
 }
 
@@ -175,9 +175,9 @@ button:hover {
 .search-results {
   position: absolute;
   z-index: 5;
-  top: 44px;
+  top: 42px;
   left: 0;
-  right: 88px;
+  right: 79px;
   display: none;
   max-height: 280px;
   overflow: auto;
@@ -838,9 +838,9 @@ tbody tr.recently-added {
     z-index: 10;
     top: 0;
     grid-template-columns: 1fr;
-    gap: 10px;
-    padding-top: 12px;
-    padding-bottom: 12px;
+    gap: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   .brand {
@@ -851,12 +851,12 @@ tbody tr.recently-added {
   }
 
   .brand strong {
-    font-size: 19px;
+    font-size: 18px;
     flex: 1 1 auto;
   }
 
   .brand span {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .brand-tools {
@@ -865,54 +865,54 @@ tbody tr.recently-added {
   }
 
   #sourceBadge {
-    min-height: 26px;
-    padding: 3px 6px;
+    min-height: 22px;
+    padding: 2px 6px;
     font-size: 10px;
   }
 
   .icon-btn {
-    width: 44px;
-    height: 44px;
-    font-size: 24px;
+    width: 36px;
+    height: 36px;
+    font-size: 22px;
   }
 
   .search {
-    grid-template-columns: 1fr 48px 48px;
+    grid-template-columns: 1fr 40px 40px;
     grid-column: 1 / -1;
     order: 2;
   }
 
   .search input {
-    height: 48px;
+    height: 40px;
     font-size: 16px;
   }
 
   .search button {
-    height: 48px;
-    font-size: 24px;
+    height: 40px;
+    font-size: 23px;
   }
 
   .search-glyph {
-    width: 29px;
-    height: 29px;
+    width: 26px;
+    height: 26px;
   }
 
   .search-glyph::before {
-    width: 17px;
-    height: 17px;
-    border-width: 2.8px;
+    width: 15px;
+    height: 15px;
+    border-width: 2.6px;
   }
 
   .search-glyph::after {
-    top: 20px;
-    left: 18px;
-    width: 12px;
+    top: 18px;
+    left: 16px;
+    width: 11px;
     height: 3px;
   }
 
   .layout {
     gap: 12px;
-    padding-top: 12px;
+    padding-top: 8px;
   }
 
   .watch-panel,
