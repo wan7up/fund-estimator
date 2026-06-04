@@ -22,6 +22,8 @@ SUMMARY_INTERVAL_SECONDS = 10 * 60
 NOTICE_PREMIUM_THRESHOLD_PCT = 3.0
 DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
+AFTERNOON_CHECK_TIME = "14:30"
+AFTERNOON_CHECK_WINDOW_SECONDS = 20 * 60
 CONNECT_STATE_TTL_SECONDS = 10 * 60
 FEISHU_ACCOUNTS_BASE = "https://accounts.feishu.cn"
 LARK_ACCOUNTS_BASE = "https://accounts.larksuite.com"
@@ -261,6 +263,8 @@ class LofNoticeService:
             daily_summary_time=self.effective_daily_summary_time(state),
             ipo_reminder_enabled=self.effective_ipo_reminder_enabled(state),
             last_daily_summary_date=state.get("last_daily_summary_date"),
+            last_afternoon_check_date=state.get("last_afternoon_check_date"),
+            last_afternoon_check_at=state.get("last_afternoon_check_at"),
             last_ipo_reminder_date=state.get("last_ipo_reminder_date"),
             cooldown_count=len(self.active_cooldown_keys()),
             state_path=str(self.config.state_path),
@@ -495,6 +499,16 @@ class LofNoticeService:
             return False
         return self._is_after_daily_summary_time(local, self.effective_daily_summary_time(state))
 
+    def should_run_afternoon_check(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now(UTC)
+        local = now.astimezone(MARKET_TZ)
+        if local.weekday() >= 5:
+            return False
+        state = read_json(self.config.state_path, {})
+        if state.get("last_afternoon_check_date") == local.date().isoformat():
+            return False
+        return self._is_in_afternoon_check_window(local)
+
     def _settings_from_state(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = state if state is not None else read_json(self.config.state_path, {})
         settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
@@ -585,6 +599,60 @@ class LofNoticeService:
         if row.get("status") == "sent":
             state["last_daily_summary_date"] = today
             state["last_daily_summary_at"] = now.isoformat(timespec="seconds")
+        result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
+        self._write_state(state, result, now=now)
+        return result
+
+    def notify_afternoon_check(
+        self,
+        response: LofOpportunityResponse,
+        *,
+        now: datetime | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        now = now or datetime.now(UTC)
+        state = read_json(self.config.state_path, {})
+        if not self.effective_enabled(state):
+            result = self._state_result("disabled", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        local = now.astimezone(MARKET_TZ)
+        today = local.date().isoformat()
+        if not force and local.weekday() >= 5:
+            result = self._state_result("skipped_non_trading_day", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        if not force and state.get("last_afternoon_check_date") == today:
+            result = self._state_result("skipped_duplicate_afternoon_check", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        if not force and local.time() < self._parse_hhmm(AFTERNOON_CHECK_TIME):
+            result = self._state_result("skipped_before_afternoon_check_time", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        if not force and not self._is_in_afternoon_check_window(local):
+            result = self._state_result("skipped_after_afternoon_check_window", now=now, last_error=None, rows=[])
+            self._write_state(state, result, now=now)
+            return result
+        items = self._notice_candidates(response)
+        if not items:
+            result = self._state_result("no_afternoon_opportunities", now=now, last_error=None, rows=[])
+            state["last_afternoon_check_date"] = today
+            state["last_afternoon_check_at"] = now.isoformat(timespec="seconds")
+            self._write_state(state, result, now=now)
+            return result
+        text = self._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
+        row = {
+            "created_at": now.isoformat(timespec="seconds"),
+            "kind": "afternoon_check",
+            "summary_date": today,
+            "count": len(items),
+            **self._send_feishu_openapi(text, state=state),
+        }
+        append_jsonl(self.config.ledger_path, [row])
+        if row.get("status") == "sent":
+            state["last_afternoon_check_date"] = today
+            state["last_afternoon_check_at"] = now.isoformat(timespec="seconds")
         result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
         self._write_state(state, result, now=now)
         return result
@@ -917,6 +985,11 @@ class LofNoticeService:
 
     def _is_after_daily_summary_time(self, local_now: datetime, summary_time: str | None = None) -> bool:
         return local_now.time() >= self._parse_hhmm(summary_time or self.effective_daily_summary_time())
+
+    def _is_in_afternoon_check_window(self, local_now: datetime) -> bool:
+        check_at = datetime.combine(local_now.date(), self._parse_hhmm(AFTERNOON_CHECK_TIME), tzinfo=MARKET_TZ)
+        deadline = check_at + timedelta(seconds=AFTERNOON_CHECK_WINDOW_SECONDS)
+        return check_at <= local_now <= deadline
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:

@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fund_estimator.services.lof_notifications import LofNoticeService, MARKET_TZ, read_json
+from fund_estimator.services.lof_notifications import AFTERNOON_CHECK_TIME, AFTERNOON_CHECK_WINDOW_SECONDS, LofNoticeService, MARKET_TZ, read_json
 
 
 logger = logging.getLogger(__name__)
@@ -78,26 +78,42 @@ class LofDailyNoticeScheduler:
             return 24 * 60 * 60
 
         local_now = now.astimezone(MARKET_TZ)
-        summary_time = self.notice._parse_hhmm(self.notice.effective_daily_summary_time(state))
-        last_date = str(state.get("last_daily_summary_date") or "")
+        daily_time = self.notice.effective_daily_summary_time(state)
+        checks = (
+            (daily_time, "last_daily_summary_date"),
+            (AFTERNOON_CHECK_TIME, "last_afternoon_check_date"),
+        )
+        best_delay: float | None = None
 
         for offset in range(8):
             candidate_date = local_now.date() + timedelta(days=offset)
             if candidate_date.weekday() >= 5:
                 continue
-            candidate_at = datetime.combine(candidate_date, summary_time, tzinfo=MARKET_TZ)
-            if offset == 0 and last_date == candidate_date.isoformat():
-                continue
-            if candidate_at <= local_now and last_date != candidate_date.isoformat():
-                return 0
-            if candidate_at > local_now:
-                return max(0.0, (candidate_at.astimezone(UTC) - now).total_seconds())
+            date_text = candidate_date.isoformat()
+            for hhmm, state_key in checks:
+                if str(state.get(state_key) or "") == date_text:
+                    continue
+                candidate_at = datetime.combine(candidate_date, self.notice._parse_hhmm(hhmm), tzinfo=MARKET_TZ)
+                if state_key == "last_afternoon_check_date":
+                    deadline = candidate_at + timedelta(seconds=AFTERNOON_CHECK_WINDOW_SECONDS)
+                    if candidate_at <= local_now <= deadline:
+                        return 0
+                    if deadline < local_now:
+                        continue
+                elif candidate_at <= local_now:
+                    return 0
+                delay = max(0.0, (candidate_at.astimezone(UTC) - now).total_seconds())
+                best_delay = delay if best_delay is None else min(best_delay, delay)
+            if best_delay is not None:
+                return best_delay
         return 24 * 60 * 60
 
     async def run_once(self, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(UTC)
-        if not self.notice.should_run_daily_summary(now):
-            return {"notice": {"status": "skipped_daily_summary_schedule"}}
+        due_daily = self.notice.should_run_daily_summary(now)
+        due_afternoon = self.notice.should_run_afternoon_check(now)
+        if not due_daily and not due_afternoon:
+            return {"notice": {"status": "skipped_notice_schedule"}}
 
         response = await self.monitor.get_opportunities(
             normal_threshold_pct=self.normal_threshold_pct,
@@ -106,17 +122,23 @@ class LofDailyNoticeScheduler:
             limit=self.limit,
             refresh=True,
         )
-        notice_result = self.notice.notify_daily_summary(
-            response,
-            now=now,
-            send_empty=self.send_empty,
-        )
+        notice_result: dict[str, Any] = {"status": "skipped_daily_summary_schedule"}
         new_issue_notice: dict[str, Any] | None = None
-        if notice_result.get("status") == "sent":
-            new_issue_notice = await self.notice.notify_new_issue_reminder(now=now)
+        afternoon_notice: dict[str, Any] | None = None
+        if due_daily:
+            notice_result = self.notice.notify_daily_summary(
+                response,
+                now=now,
+                send_empty=self.send_empty,
+            )
+            if notice_result.get("status") == "sent":
+                new_issue_notice = await self.notice.notify_new_issue_reminder(now=now)
+        if due_afternoon:
+            afternoon_notice = self.notice.notify_afternoon_check(response, now=now)
         result = {
             "scan": response.model_dump(mode="json"),
             "notice": notice_result,
+            "afternoon_notice": afternoon_notice,
             "new_issue_notice": new_issue_notice,
         }
         logger.info("LOF daily notice scheduler result: %s", result)

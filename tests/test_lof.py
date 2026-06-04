@@ -529,7 +529,7 @@ def test_lof_notice_scheduler_uses_configured_daily_time(tmp_path):
 
     assert before == 300
     assert due == 0
-    assert after_sent > 23 * 60 * 60
+    assert after_sent == 4 * 60 * 60 + 25 * 60
 
 
 def test_lof_notice_scheduler_sends_new_issue_after_daily_summary(tmp_path):
@@ -763,3 +763,139 @@ def test_lof_notice_daily_summary_skips_weekends(tmp_path):
     result = notice.notify_daily_summary(response, now=datetime(2026, 5, 30, 2, 30, tzinfo=UTC))
 
     assert result["status"] == "skipped_non_trading_day"
+
+
+
+def _afternoon_notice_item(
+    code: str = "160001",
+    premium: float = 4.2,
+    turnover: float = 5_000_000,
+    purchase_status: str = "开放",
+) -> LofPremiumItem:
+    now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
+    return LofPremiumItem(
+        code=code,
+        name=f"测试LOF{code}",
+        estimated_premium_pct=premium,
+        official_premium_pct=premium,
+        exchange_turnover_yuan=turnover,
+        purchase_status=purchase_status,
+        redemption_status="开放",
+        daily_purchase_limit_yuan=10_000,
+        direction="neutral",
+        level="none",
+        updated_at=now,
+    )
+
+
+def _afternoon_response(now: datetime, items: list[LofPremiumItem]) -> LofOpportunityResponse:
+    return LofOpportunityResponse(
+        scanned_at=now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=items,
+    )
+
+
+def test_lof_notice_afternoon_check_sends_once_after_1430(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
+    response = _afternoon_response(now, [_afternoon_notice_item()])
+
+    first = notice.notify_afternoon_check(response, now=now)
+    second = notice.notify_afternoon_check(response, now=now + timedelta(minutes=5))
+
+    assert first["status"] == "sent"
+    assert second["status"] == "skipped_duplicate_afternoon_check"
+    assert len(sent_texts) == 1
+    assert "【LOF套利机会提醒】2026-06-03 14:30" in sent_texts[0]
+    assert "160001 测试LOF160001" in sent_texts[0]
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state["last_afternoon_check_date"] == "2026-06-03"
+    rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["kind"] == "afternoon_check"
+
+
+def test_lof_notice_afternoon_check_skips_empty_without_sending(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
+    response = _afternoon_response(now, [])
+
+    result = notice.notify_afternoon_check(response, now=now)
+    duplicate = notice.notify_afternoon_check(response, now=now + timedelta(minutes=5))
+
+    assert result["status"] == "no_afternoon_opportunities"
+    assert duplicate["status"] == "skipped_duplicate_afternoon_check"
+    assert sent_texts == []
+    assert not config.ledger_path.exists()
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state["last_afternoon_check_date"] == "2026-06-03"
+
+
+def test_lof_notice_afternoon_check_does_not_backfill_after_window(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    late = datetime(2026, 6, 3, 7, 0, tzinfo=UTC)
+    response = _afternoon_response(late, [_afternoon_notice_item()])
+
+    result = notice.notify_afternoon_check(response, now=late)
+
+    assert notice.should_run_afternoon_check(late) is False
+    assert result["status"] == "skipped_after_afternoon_check_window"
+    assert sent_texts == []
+    assert not config.ledger_path.exists()
+
+
+def test_lof_notice_scheduler_runs_afternoon_after_daily_summary(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    config.state_path.write_text(json.dumps({"last_daily_summary_date": "2026-06-03"}), encoding="utf-8")
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
+    monitor = DummyNoticeMonitor(_afternoon_response(now, [_afternoon_notice_item("160002", 4.8, 8_000_000)]))
+    scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice)
+
+    due_delay = scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 5, tzinfo=UTC))
+    result = __import__("asyncio").run(scheduler.run_once(now=now))
+
+    assert due_delay == 4 * 60 * 60 + 25 * 60
+    assert result["notice"]["status"] == "skipped_daily_summary_schedule"
+    assert result["afternoon_notice"]["status"] == "sent"
+    assert len(sent_texts) == 1
+    assert monitor.calls and monitor.calls[0]["refresh"] is True

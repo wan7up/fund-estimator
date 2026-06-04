@@ -31,8 +31,10 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
     estimator = create_estimator_service()
     notice = LofNoticeService()
     now = datetime.now(UTC)
-    if not args.force and not notice.should_run_daily_summary(now):
-        return {"notice": {"status": "skipped_daily_summary_schedule"}}
+    due_daily = notice.should_run_daily_summary(now)
+    due_afternoon = notice.should_run_afternoon_check(now)
+    if not args.force and not args.force_afternoon_check and not due_daily and not due_afternoon:
+        return {"notice": {"status": "skipped_notice_schedule"}}
     monitor = create_lof_monitor_service(estimator, notice_service=notice)
     response = await monitor.get_opportunities(
         normal_threshold_pct=args.normal_threshold_pct,
@@ -41,13 +43,30 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
         limit=args.limit,
         refresh=True,
     )
-    notice_result = notice.notify_daily_summary(
-        response,
-        force=args.force,
-        send_empty=not args.no_empty,
-    )
-    new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
-    return {"scan": response.model_dump(mode="json"), "notice": notice_result, "new_issue_notice": new_issue_notice}
+    notice_result: dict[str, Any] = {"status": "skipped_daily_summary_schedule"}
+    new_issue_notice: dict[str, Any] | None = None
+    afternoon_notice: dict[str, Any] | None = None
+    if args.force or due_daily:
+        notice_result = notice.notify_daily_summary(
+            response,
+            now=now,
+            force=args.force,
+            send_empty=not args.no_empty,
+        )
+        if notice_result.get("status") == "sent" or args.force_new_issue:
+            new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
+    if args.force_afternoon_check or due_afternoon:
+        afternoon_notice = notice.notify_afternoon_check(
+            response,
+            now=now,
+            force=args.force_afternoon_check,
+        )
+    return {
+        "scan": response.model_dump(mode="json"),
+        "notice": notice_result,
+        "afternoon_notice": afternoon_notice,
+        "new_issue_notice": new_issue_notice,
+    }
 
 
 async def send_test_command(_: argparse.Namespace) -> dict[str, Any]:
@@ -76,6 +95,7 @@ def main() -> None:
     daily.add_argument("--limit", type=int, default=120)
     daily.add_argument("--force", action="store_true")
     daily.add_argument("--force-new-issue", action="store_true")
+    daily.add_argument("--force-afternoon-check", action="store_true")
     daily.add_argument("--no-empty", action="store_true", help="do not send a message when there are no actionable items")
 
     subparsers.add_parser("send-test")
