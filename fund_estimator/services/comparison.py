@@ -92,7 +92,7 @@ SCORE_FACTOR_LABELS: dict[str, str] = {
     "performance": "历史收益",
     "ranking": "同类表现",
     "scale": "规模",
-    "allocation": "配置风险",
+    "allocation": "仓位稳健性",
     "holdings": "持仓结构",
     "manager": "基金经理",
     "similarity": "可比性",
@@ -101,8 +101,8 @@ SCORE_FACTOR_LABELS: dict[str, str] = {
 SCORE_FACTOR_BASIS: dict[str, str] = {
     "performance": "近1月、近3月、近6月、近1年阶段收益，结合绝对表现和候选基金内相对表现。",
     "ranking": "基金在同类中的排名或百分位，用来避免只和不同赛道基金直接比收益。",
-    "scale": "规模过小有流动性/清盘风险，过大可能影响策略弹性，中等规模更优。",
-    "allocation": "股票、债券、现金仓位与当前策略口径的匹配度，也作为风险暴露的代理指标。",
+    "scale": "规模过小稳定性不足，过大可能影响策略弹性，中等规模更优。",
+    "allocation": "股票、债券、现金仓位与当前策略口径的匹配度，用来区分进攻型和稳妥型候选。",
     "holdings": "前十大持仓占比反映集中度；过度集中会降分，缺失时只给中性偏低分。",
     "manager": "基金经理任职年限、管理规模和星级等披露信息；缺失时不直接判负。",
     "similarity": "候选基金之间的主题、类型、资产配置和持仓相似度，只作为小权重校准。",
@@ -791,6 +791,7 @@ class FundComparisonService:
         outlier_labels = self._outlier_labels(fund_results, pair_similarities)
         theme_text = self._theme_section(theme_analysis)
         style_text = self._style_section(fund_results)
+        choice_text = self._choice_section(fund_results, conclusion, strategy, theme_analysis)
         if conclusion == "not_comparable":
             parts = ["整体判断：这组基金不能作为一个整体强行排名。"]
             if similar_pairs:
@@ -800,8 +801,8 @@ class FundComparisonService:
             if unrelated_pairs:
                 parts.append(f"低相关组合包括 {self._join_labels(unrelated_pairs)}。")
             overview = "".join(parts)
-            advice = "选择建议：先剔除不相关基金，或按板块/资产类型拆成小组后再比较；当前分数只用于看各自基础条件，不给出谁更好的强结论。"
-            return None, "\n\n".join([overview, theme_text, style_text, advice])
+            advice = "购买取舍：先按板块/资产类型拆成小组；在相似小组内用综合分择优，偏离目标板块的基金单独说明用途，不和主目标基金混排。"
+            return None, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
         best = fund_results[0]
         runner_up = fund_results[1] if len(fund_results) > 1 else None
         reason_text = "、".join(best.reasons[:3])
@@ -813,10 +814,10 @@ class FundComparisonService:
                 f"它的主要优势是{reason_text}。"
             )
             advice = (
-                "选择建议：如果只想保留一只，优先看综合分更高者；如果两只分别是 A/C 或同指数不同份额，"
+                "购买取舍：如果只想保留一只，优先买综合分更高者；如果两只分别是 A/C 或同指数不同份额，"
                 "再结合费率、限购金额和你实际买入渠道确认，费率与限购只作为交易便利性参考，不参与评分。"
             )
-            return best.code, "\n\n".join([overview, theme_text, style_text, advice])
+            return best.code, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
         relation_hint = ""
         if similar_pairs:
             relation_hint += f"其中 {self._join_labels(similar_pairs)} 高度相似；"
@@ -827,11 +828,98 @@ class FundComparisonService:
             f"按{strategy_label}口径当前排序第一的是 {best.name}（{best.code}），主要优势是{reason_text}。"
         )
         advice = (
-            "选择建议：如果你的目标是更高弹性，优先看股票仓位高、阶段收益和同类排名更强的基金；"
+            "购买取舍：如果你的目标是更高弹性，优先看股票仓位高、阶段收益和同类排名更强的基金；"
             "如果更在意持有体验，优先看规模适中、前十大集中度不过高、风格更清晰且限购不影响买入的基金。"
             "最终要和你的板块暴露目标对齐，而不是只看总分。"
         )
-        return best.code, "\n\n".join([overview, theme_text, style_text, advice])
+        return best.code, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
+
+    def _choice_section(
+        self,
+        fund_results: list[CompareFundResult],
+        conclusion: CompareConclusion,
+        strategy: CompareStrategy,
+        theme_analysis: CompareThemeAnalysis,
+    ) -> str:
+        if not fund_results:
+            return "购买取舍：暂无可用于排序的候选。"
+        comparable_results = self._comparable_choice_pool(fund_results, conclusion, theme_analysis)
+        best = comparable_results[0]
+        stable = self._stable_pick(comparable_results)
+        scope = ""
+        if conclusion == "not_comparable" and len(comparable_results) < len(fund_results):
+            scope = "（只在目标板块/同组候选内）"
+        parts = [
+            f"相对优选{scope}：{best.name}（{best.code}），按{STRATEGY_LABELS[strategy]}口径综合分最高，关键依据是{'、'.join(best.reasons[:3])}。",
+        ]
+        if stable.code == best.code:
+            parts.append(f"相对稳妥：仍偏向 {stable.name}（{stable.code}），{self._stable_reason(stable)}。")
+        else:
+            parts.append(f"相对稳妥：{stable.name}（{stable.code}）更适合稳一点的买法，{self._stable_reason(stable)}。")
+        if conclusion == "not_comparable":
+            outliers = self._theme_outlier_names(fund_results, theme_analysis)
+            if outliers:
+                parts.append(f"偏离项：{self._join_labels(outliers)} 与目标板块不一致，适合单独按自身主题判断，不参与主目标排序。")
+            else:
+                parts.append("偏离项：这组基金共同主题不清晰，优先按资产类型拆组后再在组内择优。")
+        return "购买取舍：\n" + "\n".join(f"- {part}" for part in parts)
+
+    @staticmethod
+    def _comparable_choice_pool(
+        fund_results: list[CompareFundResult],
+        conclusion: CompareConclusion,
+        theme_analysis: CompareThemeAnalysis,
+    ) -> list[CompareFundResult]:
+        if conclusion != "not_comparable" or not theme_analysis.theme_hint:
+            return fund_results
+        allowed_codes = {
+            item.code
+            for item in theme_analysis.exposures
+            if item.match_level in {"match", "partial"}
+        }
+        selected = [item for item in fund_results if item.code in allowed_codes]
+        return selected or fund_results
+
+    @staticmethod
+    def _theme_outlier_names(
+        fund_results: list[CompareFundResult],
+        theme_analysis: CompareThemeAnalysis,
+    ) -> list[str]:
+        if not theme_analysis.theme_hint:
+            return []
+        name_map = {item.code: item.name for item in fund_results}
+        return [
+            f"{name_map.get(item.code, item.name)}（{item.code}）"
+            for item in theme_analysis.exposures
+            if item.match_level == "unmatched"
+        ]
+
+    @staticmethod
+    def _stable_pick(fund_results: list[CompareFundResult]) -> CompareFundResult:
+        def score(item: CompareFundResult) -> float:
+            breakdown = item.score_breakdown
+            return (
+                0.34 * breakdown.allocation
+                + 0.28 * breakdown.scale
+                + 0.24 * breakdown.holdings
+                + 0.14 * breakdown.manager
+            )
+
+        return max(fund_results, key=score)
+
+    @staticmethod
+    def _stable_reason(item: CompareFundResult) -> str:
+        snapshot = item.snapshot
+        parts: list[str] = []
+        if snapshot.stock_pct is not None:
+            parts.append(f"股票仓位约{float(snapshot.stock_pct):.1f}%")
+        if snapshot.top10_weight_sum is not None:
+            parts.append(f"前十大占比约{float(snapshot.top10_weight_sum):.1f}%")
+        if snapshot.scale_billion is not None:
+            parts.append(f"规模约{float(snapshot.scale_billion):.2f}亿")
+        if snapshot.purchase_limit_yuan is not None:
+            parts.append(f"限购金额{_format_yuan(snapshot.purchase_limit_yuan)}")
+        return "、".join(parts) if parts else "仓位、规模或持仓集中度披露较少，需要结合详情页确认"
 
     @staticmethod
     def _theme_section(theme_analysis: CompareThemeAnalysis) -> str:
@@ -950,7 +1038,7 @@ class FundComparisonService:
         if "债" in text:
             return "更适合作为低权益波动的防守/固收候选。"
         if "qdii" in text or "海外" in text or "全球" in text:
-            return "更像海外资产或跨市场敞口工具，需要单独看汇率和海外市场风险。"
+            return "更像海外资产或跨市场敞口工具，需要单独看汇率和海外市场波动。"
         if "指数" in text or "etf" in text:
             return "更像工具型配置，重点看跟踪标的、费率、规模和限购便利性。"
         if stock is not None and stock >= 85 and top10 is not None and top10 >= 65:
@@ -1029,7 +1117,7 @@ class FundComparisonService:
             return "高度相似，可直接择优"
         if conclusion == "same_theme_different":
             return "同类可比，但风格不同"
-        return "相关性不足，不建议强行比较"
+        return "相关性不足，先分组取舍"
 
     @staticmethod
     def _global_warnings(
@@ -1044,8 +1132,7 @@ class FundComparisonService:
         if any(pair.holdings_similarity is None for pair in pair_similarities):
             warnings.append("部分基金缺少前十大持仓，持仓相似度会降级为产品画像判断。")
         if conclusion == "not_comparable":
-            warnings.append("不可比结论下不会给出强推荐，分数仅用于查看各自基础条件。")
-        warnings.append("比较结果基于公开披露和本工具模型估算，仅供研究参考，不构成投资建议。")
+            warnings.append("相关性不足时不跨组硬排；页面会优先在同板块/同资产类型小组内给购买取舍。")
         return warnings
 
     @staticmethod
