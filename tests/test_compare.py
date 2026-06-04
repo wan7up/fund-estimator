@@ -143,15 +143,20 @@ class FakeHoldingsSource:
         return HOLDINGS[code]
 
 
+class BrokenHoldingsSource:
+    async def get_holdings(self, code: str) -> FundHoldings:
+        raise RuntimeError("empty holdings document")
+
+
 class FakeQuoteSource:
     async def get_quotes(self, stock_codes: list[str]) -> dict[str, StockQuote]:
         return {code: QUOTES[code] for code in stock_codes if code in QUOTES}
 
 
-def make_service(tmp_path) -> FundComparisonService:
+def make_service(tmp_path, holdings_source=None) -> FundComparisonService:
     estimator = FundEstimatorService(
         fund_source=FakeFundSource(),
-        holdings_source=FakeHoldingsSource(),
+        holdings_source=holdings_source or FakeHoldingsSource(),
         quote_source=FakeQuoteSource(),
         cache=SQLiteCache(tmp_path / "compare.sqlite3"),
         allow_mock_fallback=False,
@@ -295,3 +300,15 @@ def test_missing_holdings_and_estimate_degrade_with_warning(tmp_path):
     assert bond.snapshot.top10_weight_sum is None
     assert bond.warnings
     assert result.conclusion == "not_comparable"
+
+
+def test_unexpected_holdings_parser_error_degrades_with_warning(tmp_path):
+    service = make_service(tmp_path, holdings_source=BrokenHoldingsSource())
+    request = CompareRequest(codes=["100001", "200001"], strategy="balanced", theme_hint="半导体")
+
+    result = asyncio.run(service.compare(request))
+
+    assert result.conclusion == "not_comparable"
+    assert all(item.snapshot.top10_weight_sum is None for item in result.funds)
+    assert any("RuntimeError" in warning for item in result.funds for warning in item.warnings)
+    assert result.theme_analysis is not None

@@ -171,6 +171,8 @@ class FundComparisonService:
             candidate.holdings = await self.estimator.get_holdings(code)
         except AppError as exc:
             candidate.warnings.append(f"持仓数据不可用：{exc.message}")
+        except Exception as exc:
+            candidate.warnings.append(f"持仓数据不可用：{type(exc).__name__}")
         try:
             candidate.estimate = await self.estimator.estimate(code, mode="both")
         except AppError:
