@@ -860,7 +860,6 @@ class LofNoticeService:
                 )
             if len(calendar.bonds) > 10:
                 lines.append(f"另有 {len(calendar.bonds) - 10} 只新债未列出。")
-        lines.extend(["", "操作提示：在券商客户端的新股/新债申购入口处理；中签后注意缴款日和账户可用资金。"])
         return "\n".join(lines)
 
     @staticmethod
@@ -877,10 +876,11 @@ class LofNoticeService:
             local_now = now.astimezone(MARKET_TZ)
             return "\n".join(
                 [
-                    f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
+                    "【LOF套利机会提醒】",
+                    local_now.strftime('%Y-%m-%d %H:%M'),
                     "当前暂无可操作套利机会。",
                     f"扫描池：{len(response.items)}只",
-                    f"主要过滤条件：折价或溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%、申购未明确暂停、成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}。",
+                    f"原因：无发现折价或溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%且成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}",
                 ]
             )
         return LofNoticeService._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
@@ -893,7 +893,7 @@ class LofNoticeService:
         min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN,
     ) -> str:
         local_now = now.astimezone(MARKET_TZ)
-        lines = [f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}"]
+        lines = ["【LOF套利机会提醒】", local_now.strftime("%Y-%m-%d %H:%M")]
         for index, item in enumerate(items):
             if index:
                 lines.append("")
@@ -912,7 +912,8 @@ class LofNoticeService:
         local_now = now.astimezone(MARKET_TZ)
         return "\n".join(
             [
-                f"【LOF套利机会提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
+                "【LOF套利机会提醒】",
+                local_now.strftime('%Y-%m-%d %H:%M'),
                 "501312 华宝海外科技股票(QDII-LOF)A",
                 "操作建议：测试通知，当前未取得基金实时数据，仅用于验证飞书连接。",
                 "成交额：--；估算溢价：--",

@@ -414,7 +414,7 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert first["status"] == "sent"
     assert second["status"] == "skipped_duplicate_daily_summary"
     assert len(sent_texts) == 1
-    assert "【LOF套利机会提醒】2026-05-29 10:05" in sent_texts[0]
+    assert sent_texts[0].startswith("【LOF套利机会提醒】\n2026-05-29 10:05")
     assert "161128" in sent_texts[0]
     assert "操作建议：" in sent_texts[0]
     assert "成交额：" in sent_texts[0]
@@ -423,6 +423,62 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert "申购限额" in sent_texts[0]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_daily_summary_date"] == "2026-05-29"
+
+
+def test_lof_notice_empty_daily_summary_uses_compact_reason_template(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="09:30",
+        send_empty_daily_summary=True,
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 4, 1, 30, tzinfo=UTC)
+    items = [
+        LofPremiumItem(
+            code=f"16{i:04d}",
+            name=f"测试LOF{i}",
+            estimated_premium_pct=1.0,
+            official_premium_pct=1.0,
+            exchange_turnover_yuan=5_000_000,
+            purchase_status="开放",
+            redemption_status="开放",
+            daily_purchase_limit_yuan=10_000,
+            direction="neutral",
+            level="none",
+            updated_at=now,
+        )
+        for i in range(120)
+    ]
+    response = LofOpportunityResponse(
+        scanned_at=now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=items,
+    )
+
+    result = notice.notify_daily_summary(response, now=now)
+
+    assert result["status"] == "sent"
+    assert sent_texts == [
+        "\n".join(
+            [
+                "【LOF套利机会提醒】",
+                "2026-06-04 09:30",
+                "当前暂无可操作套利机会。",
+                "扫描池：120只",
+                "原因：无发现折价或溢价超过3%且成交额超过300万",
+            ]
+        )
+    ]
 
 
 def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path):
@@ -634,13 +690,58 @@ def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
                 "新债：",
                 "118068 迪威转债（申购代码 718377，正股 迪威尔）",
                 "评级：AA-；规模：9.08亿",
-                "",
-                "操作提示：在券商客户端的新股/新债申购入口处理；中签后注意缴款日和账户可用资金。",
             ]
         )
     ]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_ipo_reminder_date"] == "2026-06-03"
+
+
+def test_new_issue_reminder_omits_empty_stock_section_and_footer(tmp_path):
+    calendar = NewIssueCalendar(
+        target_date=date(2026, 6, 4),
+        stocks=[],
+        bonds=[
+            NewIssueItem(
+                kind="bond",
+                code="118068",
+                name="迪威转债",
+                apply_code="718377",
+                rating="AA-",
+                issue_scale_billion=9.07705,
+                underlying="迪威尔",
+            )
+        ],
+    )
+    source = DummyNewIssueSource(calendar)
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="09:30",
+        ipo_reminder_enabled=True,
+    )
+    notice = LofNoticeService(config, new_issue_source=source)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+
+    result = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 4, 1, 30, tzinfo=UTC)))
+
+    assert result["status"] == "sent"
+    assert sent_texts == [
+        "\n".join(
+            [
+                "【打新提醒】2026-06-04 09:30",
+                "今日可打新：新股 0 只，新债 1 只",
+                "",
+                "新债：",
+                "118068 迪威转债（申购代码 718377，正股 迪威尔）",
+                "评级：AA-；规模：9.08亿",
+            ]
+        )
+    ]
 
 
 def test_new_issue_reminder_skips_when_disabled_or_empty(tmp_path):
@@ -686,7 +787,8 @@ def test_lof_notice_test_uses_alert_template(tmp_path):
     assert sent_texts == [
         "\n".join(
             [
-                "【LOF套利机会提醒】2026-06-03 10:04",
+                "【LOF套利机会提醒】",
+                "2026-06-03 10:04",
                 "501312 核心LOF501312",
                 "操作建议：当前折溢价未超过提醒阈值，建议仅观察。",
                 "成交额：10万；估算溢价：+0.00%",
@@ -820,7 +922,7 @@ def test_lof_notice_afternoon_check_sends_once_after_1430(tmp_path):
     assert first["status"] == "sent"
     assert second["status"] == "skipped_duplicate_afternoon_check"
     assert len(sent_texts) == 1
-    assert "【LOF套利机会提醒】2026-06-03 14:30" in sent_texts[0]
+    assert sent_texts[0].startswith("【LOF套利机会提醒】\n2026-06-03 14:30")
     assert "160001 测试LOF160001" in sent_texts[0]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_afternoon_check_date"] == "2026-06-03"
