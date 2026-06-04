@@ -275,8 +275,12 @@ def test_theme_analysis_without_hint_only_reports_inferred_themes(tmp_path):
 
     assert result.theme_analysis is not None
     assert result.theme_analysis.theme_hint is None
-    assert "未填写目标板块" in result.theme_analysis.summary
-    assert all(item.match_level == "unknown" for item in result.theme_analysis.exposures)
+    assert "自动识别" in result.theme_analysis.summary
+    assert "共同板块" in result.theme_analysis.summary
+    assert "未填写目标板块" not in result.theme_analysis.summary
+    assert "板块线索" in result.recommendation
+    assert all("未填写目标板块" not in item.comment for item in result.theme_analysis.exposures)
+    assert all(item.match_level == "match" for item in result.theme_analysis.exposures)
 
 
 def test_mixed_group_explains_similar_pairs_and_outliers(tmp_path):

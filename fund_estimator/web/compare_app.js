@@ -31,7 +31,7 @@ const THEME_MATCH_LABELS = {
   match: "匹配",
   partial: "相关",
   unmatched: "偏离",
-  unknown: "待判断",
+  unknown: "线索",
 };
 
 const SCORE_LABELS = {
@@ -92,7 +92,6 @@ const els = {
   addTypedBtn: document.querySelector("#addTypedBtn"),
   compareBtn: document.querySelector("#compareBtn"),
   strategyTabs: document.querySelectorAll("[data-strategy]"),
-  themeInput: document.querySelector("#themeInput"),
   selectedFunds: document.querySelector("#selectedFunds"),
   selectionStatus: document.querySelector("#selectionStatus"),
   errorBanner: document.querySelector("#errorBanner"),
@@ -671,7 +670,6 @@ async function compareFunds() {
     const payload = {
       codes: state.selected.map((item) => item.code),
       strategy: state.strategy,
-      theme_hint: els.themeInput.value.trim() || null,
     };
     state.result = await api("/api/compare", {
       method: "POST",
@@ -750,7 +748,7 @@ function renderThemeAnalysis(themeAnalysis) {
     return;
   }
   els.themePanel.hidden = false;
-  els.themeMeta.textContent = themeAnalysis.theme_hint ? `目标：${themeAnalysis.theme_hint}` : "未填写目标板块";
+  els.themeMeta.textContent = themeAnalysis.theme_hint ? `目标：${themeAnalysis.theme_hint}` : "自动识别";
   els.themeSummary.textContent = themeAnalysis.summary || "";
   els.themeGrid.innerHTML = themeAnalysis.exposures
     .map((item) => {
