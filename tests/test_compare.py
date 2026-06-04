@@ -176,7 +176,11 @@ def test_very_similar_funds_get_direct_recommendation(tmp_path):
     assert result.conclusion == "very_similar"
     assert result.recommendation_code in {"100001", "100002"}
     assert "逐只风格" in result.recommendation
-    assert "选择建议" in result.recommendation
+    assert "购买取舍" in result.recommendation
+    assert "相对优选" in result.recommendation
+    assert "相对稳妥" in result.recommendation
+    assert "不构成投资建议" not in result.recommendation
+    assert "仅供研究参考" not in result.recommendation
     assert result.funds[0].recommended is True
     assert result.pair_similarities[0].holdings_similarity > 90
     assert not hasattr(result.funds[0].score_breakdown, "confidence")
@@ -258,8 +262,12 @@ def test_unrelated_funds_do_not_get_strong_recommendation(tmp_path):
     assert "板块匹配" in result.recommendation
     assert "逐只风格" in result.recommendation
     assert "低权益波动" in result.recommendation
+    assert "购买取舍" in result.recommendation
+    assert "目标板块/同组候选" in result.recommendation
+    assert "不构成投资建议" not in result.recommendation
+    assert "仅供研究参考" not in result.recommendation
     assert all(not item.recommended for item in result.funds)
-    assert any("不可比" in warning for warning in result.warnings)
+    assert any("同板块/同资产类型小组" in warning for warning in result.warnings)
 
 
 def test_theme_analysis_without_hint_only_reports_inferred_themes(tmp_path):
@@ -279,6 +287,8 @@ def test_mixed_group_explains_similar_pairs_and_outliers(tmp_path):
     assert "100001" in result.recommendation
     assert "100002" in result.recommendation
     assert "200001" in result.recommendation
+    assert "相对优选" in result.recommendation
+    assert "偏离项" in result.recommendation
     assert any(pair.relation == "very_similar" for pair in result.pair_similarities)
     assert any(pair.relation == "not_comparable" for pair in result.pair_similarities)
 

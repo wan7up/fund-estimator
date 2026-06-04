@@ -134,9 +134,14 @@ def test_prompt_preserves_rule_boundaries(tmp_path):
     assert "不重新打分" in prompt
     assert "不改变排序" in prompt
     assert "not_comparable" in prompt
-    assert "不要给出谁更好的强推荐" in prompt
+    assert "不要跨组硬排" in prompt
+    assert "相对优选/相对稳妥" in prompt
+    assert "不承诺收益" not in prompt
+    assert "关键风险" not in prompt
     assert "候选基金研究员" in prompt
     assert "固定输出 4 行纯文本" in prompt
     assert "板块：必须结合 theme_hint/theme_analysis" in prompt
     assert "不要复述规则评价原文或评分表" in prompt
     assert "不要写泛泛的基金投资科普" in prompt
+    assert "泛泛免责声明" in prompt
+    assert "不构成投资建议" not in prompt
