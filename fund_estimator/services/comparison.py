@@ -19,6 +19,8 @@ from fund_estimator.models.schema import (
     CompareScoreFactor,
     CompareScoreBreakdown,
     CompareStrategy,
+    CompareThemeAnalysis,
+    CompareThemeExposure,
     EstimateResponse,
     FundHoldings,
     FundProfile,
@@ -41,6 +43,13 @@ THEME_KEYWORDS: dict[str, tuple[str, ...]] = {
     "油气": ("原油", "油气", "石油", "能源"),
     "黄金": ("黄金", "贵金属"),
     "债券": ("债", "信用债", "利率债", "可转债"),
+}
+
+THEME_RELATED: dict[str, set[str]] = {
+    "科技": {"半导体", "互联网"},
+    "半导体": {"科技"},
+    "互联网": {"科技"},
+    "新能源": {"科技"},
 }
 
 STRATEGY_LABELS: dict[CompareStrategy, str] = {
@@ -131,7 +140,14 @@ class FundComparisonService:
         conclusion = self._classify_group(pair_similarities)
         score_inputs = self._build_score_inputs(candidates, pair_similarities, request.strategy)
         fund_results = self._build_fund_results(candidates, score_inputs, conclusion, request.strategy)
-        recommendation_code, recommendation = self._build_recommendation(conclusion, fund_results, pair_similarities, request.strategy)
+        theme_analysis = self._build_theme_analysis(candidates, fund_results, request.theme_hint)
+        recommendation_code, recommendation = self._build_recommendation(
+            conclusion,
+            fund_results,
+            pair_similarities,
+            request.strategy,
+            theme_analysis,
+        )
         warnings = self._global_warnings(candidates, pair_similarities, conclusion)
         return CompareResponse(
             generated_at=datetime.now(UTC),
@@ -141,6 +157,7 @@ class FundComparisonService:
             conclusion_title=self._conclusion_title(conclusion),
             recommendation_code=recommendation_code,
             recommendation=recommendation,
+            theme_analysis=theme_analysis,
             funds=fund_results,
             pair_similarities=pair_similarities,
             score_factors=self._score_factors(request.strategy),
@@ -355,8 +372,110 @@ class FundComparisonService:
         return f"{candidate.name} {candidate.fund_type or ''} {managers}".lower()
 
     @staticmethod
+    def _theme_evidence_text(candidate: CompareCandidate) -> str:
+        holdings_text = ""
+        if candidate.holdings:
+            holdings_text = " ".join(item.stock_name for item in candidate.holdings.items if item.stock_name)
+        return f"{candidate.name} {candidate.fund_type or ''} {holdings_text}".lower()
+
+    @staticmethod
     def _theme_tokens(text: str) -> set[str]:
         return {theme for theme, keywords in THEME_KEYWORDS.items() if any(keyword.lower() in text for keyword in keywords)}
+
+    @staticmethod
+    def _hint_theme_tokens(theme_hint: str | None) -> set[str]:
+        if not theme_hint:
+            return set()
+        hint = theme_hint.strip().lower()
+        tokens: set[str] = set()
+        for theme, keywords in THEME_KEYWORDS.items():
+            if theme.lower() in hint or any(keyword.lower() in hint for keyword in keywords):
+                tokens.add(theme)
+        return tokens
+
+    @staticmethod
+    def _related_theme_tokens(tokens: set[str]) -> set[str]:
+        related: set[str] = set()
+        for token in tokens:
+            related.update(THEME_RELATED.get(token, set()))
+        return related
+
+    def _build_theme_analysis(
+        self,
+        candidates: list[CompareCandidate],
+        fund_results: list[CompareFundResult],
+        theme_hint: str | None,
+    ) -> CompareThemeAnalysis:
+        result_by_code = {item.code: item for item in fund_results}
+        hint = theme_hint.strip() if theme_hint else None
+        hint_lower = hint.lower() if hint else ""
+        hint_tokens = self._hint_theme_tokens(hint)
+        related_tokens = self._related_theme_tokens(hint_tokens)
+        exposures: list[CompareThemeExposure] = []
+        for candidate in candidates:
+            text = self._theme_evidence_text(candidate)
+            inferred = sorted(self._theme_tokens(text))
+            direct = bool(hint and hint_lower in text)
+            token_match = bool(hint_tokens and (set(inferred) & hint_tokens))
+            partial_match = bool(hint_tokens and (set(inferred) & related_tokens))
+            if not hint:
+                match_level = "unknown"
+                matches_hint = False
+                if inferred:
+                    comment = f"{candidate.name}（{candidate.code}）识别到{'、'.join(inferred[:3])}线索；未填写目标板块，暂不判断是否偏离。"
+                else:
+                    comment = f"{candidate.name}（{candidate.code}）暂未识别出清晰板块线索。"
+            elif direct or token_match:
+                match_level = "match"
+                matches_hint = True
+                evidence = "、".join(inferred[:3]) if inferred else hint
+                comment = f"{candidate.name}（{candidate.code}）与目标板块“{hint}”匹配，线索来自{evidence}。"
+            elif partial_match:
+                match_level = "partial"
+                matches_hint = False
+                evidence = "、".join(inferred[:3])
+                comment = f"{candidate.name}（{candidate.code}）与“{hint}”有相关性但不是完全同一板块，当前线索偏{evidence}。"
+            else:
+                match_level = "unmatched"
+                matches_hint = False
+                evidence = "、".join(inferred[:3]) if inferred else "未识别到明确主题"
+                comment = f"{candidate.name}（{candidate.code}）未显示出与“{hint}”的直接匹配，当前线索为{evidence}。"
+            item = result_by_code.get(candidate.code)
+            exposures.append(
+                CompareThemeExposure(
+                    code=candidate.code,
+                    name=item.name if item else candidate.name,
+                    inferred_themes=inferred,
+                    matches_hint=matches_hint,
+                    match_level=match_level,
+                    comment=comment,
+                )
+            )
+        summary = self._theme_analysis_summary(hint, exposures)
+        return CompareThemeAnalysis(theme_hint=hint, summary=summary, exposures=exposures)
+
+    @staticmethod
+    def _theme_analysis_summary(theme_hint: str | None, exposures: list[CompareThemeExposure]) -> str:
+        if not exposures:
+            return "暂无可用于判断板块匹配的数据。"
+        if not theme_hint:
+            inferred = sorted({theme for item in exposures for theme in item.inferred_themes})
+            if inferred:
+                return f"未填写目标板块，系统仅识别到候选里可能涉及{'、'.join(inferred[:4])}；此时不会按板块偏离给出强判断。"
+            return "未填写目标板块，且候选基金名称/持仓里暂未识别到稳定板块线索。"
+        matched = [item for item in exposures if item.match_level == "match"]
+        partial = [item for item in exposures if item.match_level == "partial"]
+        unmatched = [item for item in exposures if item.match_level == "unmatched"]
+        if len(matched) == len(exposures):
+            return f"目标板块是“{theme_hint}”，当前候选都能匹配，适合在同一板块内继续比较风格、持仓和评分。"
+        parts = [f"目标板块是“{theme_hint}”"]
+        if matched:
+            parts.append(f"{'、'.join(item.name for item in matched[:3])}更贴近")
+        if partial:
+            parts.append(f"{'、'.join(item.name for item in partial[:3])}属于相关但不完全相同的方向")
+        if unmatched:
+            parts.append(f"{'、'.join(item.name for item in unmatched[:3])}偏离目标板块，建议单独剔除或另组比较")
+        return "，".join(parts) + "。"
 
     @staticmethod
     def _classify_pair(
@@ -657,6 +776,7 @@ class FundComparisonService:
         fund_results: list[CompareFundResult],
         pair_similarities: list[ComparePairSimilarity],
         strategy: CompareStrategy,
+        theme_analysis: CompareThemeAnalysis,
     ) -> tuple[str | None, str]:
         if not fund_results:
             return None, "没有可用于比较的基金数据。"
@@ -664,6 +784,7 @@ class FundComparisonService:
         similar_pairs = self._pair_labels(fund_results, pair_similarities, relation="very_similar", limit=3)
         unrelated_pairs = self._pair_labels(fund_results, pair_similarities, relation="not_comparable", limit=4)
         outlier_labels = self._outlier_labels(fund_results, pair_similarities)
+        theme_text = self._theme_section(theme_analysis)
         style_text = self._style_section(fund_results)
         if conclusion == "not_comparable":
             parts = ["整体判断：这组基金不能作为一个整体强行排名。"]
@@ -675,7 +796,7 @@ class FundComparisonService:
                 parts.append(f"低相关组合包括 {self._join_labels(unrelated_pairs)}。")
             overview = "".join(parts)
             advice = "选择建议：先剔除不相关基金，或按板块/资产类型拆成小组后再比较；当前分数只用于看各自基础条件，不给出谁更好的强结论。"
-            return None, "\n\n".join([overview, style_text, advice])
+            return None, "\n\n".join([overview, theme_text, style_text, advice])
         best = fund_results[0]
         runner_up = fund_results[1] if len(fund_results) > 1 else None
         reason_text = "、".join(best.reasons[:3])
@@ -690,7 +811,7 @@ class FundComparisonService:
                 "选择建议：如果只想保留一只，优先看综合分更高者；如果两只分别是 A/C 或同指数不同份额，"
                 "再结合费率、限购金额和你实际买入渠道确认，费率与限购只作为交易便利性参考，不参与评分。"
             )
-            return best.code, "\n\n".join([overview, style_text, advice])
+            return best.code, "\n\n".join([overview, theme_text, style_text, advice])
         relation_hint = ""
         if similar_pairs:
             relation_hint += f"其中 {self._join_labels(similar_pairs)} 高度相似；"
@@ -705,7 +826,12 @@ class FundComparisonService:
             "如果更在意持有体验，优先看规模适中、前十大集中度不过高、风格更清晰且限购不影响买入的基金。"
             "最终要和你的板块暴露目标对齐，而不是只看总分。"
         )
-        return best.code, "\n\n".join([overview, style_text, advice])
+        return best.code, "\n\n".join([overview, theme_text, style_text, advice])
+
+    @staticmethod
+    def _theme_section(theme_analysis: CompareThemeAnalysis) -> str:
+        lines = [f"- {item.comment}" for item in theme_analysis.exposures]
+        return "板块匹配：\n" + theme_analysis.summary + ("\n" + "\n".join(lines) if lines else "")
 
     def _style_section(self, fund_results: list[CompareFundResult]) -> str:
         lines = [f"- {self._fund_style_summary(item)}" for item in fund_results]

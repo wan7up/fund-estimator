@@ -321,6 +321,24 @@ class CompareScoreFactor(BaseModel):
     basis: str
 
 
+CompareThemeMatchLevel = Literal["match", "partial", "unmatched", "unknown"]
+
+
+class CompareThemeExposure(BaseModel):
+    code: str
+    name: str
+    inferred_themes: list[str] = Field(default_factory=list)
+    matches_hint: bool = False
+    match_level: CompareThemeMatchLevel = "unknown"
+    comment: str
+
+
+class CompareThemeAnalysis(BaseModel):
+    theme_hint: str | None = None
+    summary: str
+    exposures: list[CompareThemeExposure] = Field(default_factory=list)
+
+
 class CompareResponse(BaseModel):
     generated_at: datetime
     strategy: CompareStrategy
@@ -329,6 +347,7 @@ class CompareResponse(BaseModel):
     conclusion_title: str
     recommendation_code: str | None = None
     recommendation: str
+    theme_analysis: CompareThemeAnalysis | None = None
     funds: list[CompareFundResult]
     pair_similarities: list[ComparePairSimilarity]
     score_factors: list[CompareScoreFactor] = Field(default_factory=list)

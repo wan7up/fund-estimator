@@ -231,6 +231,11 @@ def test_same_theme_different_funds_are_scored(tmp_path):
 
     assert result.conclusion == "same_theme_different"
     assert result.recommendation_code in {"100001", "100003"}
+    assert result.theme_analysis is not None
+    assert result.theme_analysis.theme_hint == "半导体"
+    assert "目标板块是“半导体”" in result.theme_analysis.summary
+    assert all(item.match_level == "match" for item in result.theme_analysis.exposures)
+    assert "板块匹配" in result.recommendation
     assert "逐只风格" in result.recommendation
     assert "股票仓位" in result.recommendation
     assert result.pair_similarities[0].relation == "same_theme_different"
@@ -242,10 +247,23 @@ def test_unrelated_funds_do_not_get_strong_recommendation(tmp_path):
 
     assert result.conclusion == "not_comparable"
     assert result.recommendation_code is None
+    assert result.theme_analysis is not None
+    assert any(item.code == "200001" and item.match_level == "unmatched" for item in result.theme_analysis.exposures)
+    assert "偏离目标板块" in result.theme_analysis.summary
+    assert "板块匹配" in result.recommendation
     assert "逐只风格" in result.recommendation
     assert "低权益波动" in result.recommendation
     assert all(not item.recommended for item in result.funds)
     assert any("不可比" in warning for warning in result.warnings)
+
+
+def test_theme_analysis_without_hint_only_reports_inferred_themes(tmp_path):
+    result = compare(tmp_path, ["100001", "100003"])
+
+    assert result.theme_analysis is not None
+    assert result.theme_analysis.theme_hint is None
+    assert "未填写目标板块" in result.theme_analysis.summary
+    assert all(item.match_level == "unknown" for item in result.theme_analysis.exposures)
 
 
 def test_mixed_group_explains_similar_pairs_and_outliers(tmp_path):

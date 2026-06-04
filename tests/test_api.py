@@ -149,6 +149,9 @@ def test_compare_api_returns_mock_comparison(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert body["conclusion"] == "very_similar"
     assert body["recommendation_code"] in {"001438", "001439"}
+    assert body["theme_analysis"]["theme_hint"] == "混合"
+    assert body["theme_analysis"]["exposures"]
+    assert "板块匹配" in body["recommendation"]
     assert len(body["funds"]) == 2
     assert body["pair_similarities"][0]["holdings_similarity"] > 90
     assert "estimated_move" not in body["funds"][0]["score_breakdown"]
