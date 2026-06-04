@@ -27,6 +27,13 @@ const CONCLUSION_LABELS = {
   not_comparable: "不可强比",
 };
 
+const THEME_MATCH_LABELS = {
+  match: "匹配",
+  partial: "相关",
+  unmatched: "偏离",
+  unknown: "待判断",
+};
+
 const SCORE_LABELS = {
   performance: "历史收益",
   ranking: "同类表现",
@@ -93,6 +100,10 @@ const els = {
   conclusionBadge: document.querySelector("#conclusionBadge"),
   conclusionTitle: document.querySelector("#conclusionTitle"),
   recommendationText: document.querySelector("#recommendationText"),
+  themePanel: document.querySelector("#themePanel"),
+  themeMeta: document.querySelector("#themeMeta"),
+  themeSummary: document.querySelector("#themeSummary"),
+  themeGrid: document.querySelector("#themeGrid"),
   rankingMeta: document.querySelector("#rankingMeta"),
   rankingRows: document.querySelector("#rankingRows"),
   fundCards: document.querySelector("#fundCards"),
@@ -690,6 +701,10 @@ function updateSelectedNames(funds) {
 function renderEmptyResult() {
   state.ai.commentary = null;
   els.resultSummary.hidden = true;
+  els.themePanel.hidden = true;
+  els.themeMeta.textContent = "等待结果";
+  els.themeSummary.textContent = "";
+  els.themeGrid.innerHTML = "";
   els.rankingMeta.textContent = "等待结果";
   els.scoreMeta.textContent = "等待结果";
   els.pairMeta.textContent = "等待结果";
@@ -720,9 +735,38 @@ function renderResult() {
   renderRanking(result);
   renderScoreDetails(result);
   renderMethodology(result.score_factors);
+  renderThemeAnalysis(result.theme_analysis);
   renderPairs(result);
   renderWarnings(result);
   renderAiPanel();
+}
+
+function renderThemeAnalysis(themeAnalysis) {
+  if (!themeAnalysis || !themeAnalysis.exposures?.length) {
+    els.themePanel.hidden = true;
+    els.themeMeta.textContent = "未识别";
+    els.themeSummary.textContent = "";
+    els.themeGrid.innerHTML = "";
+    return;
+  }
+  els.themePanel.hidden = false;
+  els.themeMeta.textContent = themeAnalysis.theme_hint ? `目标：${themeAnalysis.theme_hint}` : "未填写目标板块";
+  els.themeSummary.textContent = themeAnalysis.summary || "";
+  els.themeGrid.innerHTML = themeAnalysis.exposures
+    .map((item) => {
+      const level = item.match_level || "unknown";
+      const themes = item.inferred_themes?.length ? item.inferred_themes.join("、") : "暂无明确线索";
+      return `
+        <article class="theme-item ${level}">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(THEME_MATCH_LABELS[level] || level)}</span>
+          </div>
+          <small>${escapeHtml(item.code)} · ${escapeHtml(themes)}</small>
+          <p>${escapeHtml(item.comment || "")}</p>
+        </article>`;
+    })
+    .join("");
 }
 
 function renderRanking(result) {

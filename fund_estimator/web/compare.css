@@ -551,6 +551,77 @@ td:first-child {
   padding: 14px 16px;
 }
 
+.theme-summary {
+  padding: 12px 16px 0;
+  color: #344054;
+  line-height: 1.65;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 16px 14px;
+}
+
+.theme-item {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfcfe;
+}
+
+.theme-item div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.theme-item strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-item span {
+  min-width: 48px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #eef2f6;
+  color: #475467;
+  font-size: 12px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.theme-item.match span {
+  background: #dcfae6;
+  color: #087443;
+}
+
+.theme-item.partial span {
+  background: #fff4cc;
+  color: #9a5b00;
+}
+
+.theme-item.unmatched span {
+  background: #ffe4e2;
+  color: #b42318;
+}
+
+.theme-item small {
+  color: var(--muted);
+}
+
+.theme-item p {
+  color: #344054;
+  line-height: 1.55;
+}
+
 .methodology-item {
   display: grid;
   gap: 8px;
@@ -1027,6 +1098,10 @@ td:first-child {
   }
 
   .methodology-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-grid {
     grid-template-columns: 1fr;
   }
 
