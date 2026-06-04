@@ -177,6 +177,9 @@ class FundComparisonService:
             candidate.estimate = await self.estimator.estimate(code, mode="both")
         except AppError:
             candidate.estimate = None
+        except Exception as exc:
+            candidate.estimate = None
+            candidate.warnings.append(f"估值数据不可用：{type(exc).__name__}")
         candidate.purchase_limit_yuan = await self._load_purchase_limit_yuan(code, profile)
         if candidate.purchase_limit_yuan is None:
             candidate.purchase_limit_yuan = self._profile_purchase_limit_yuan(profile)
