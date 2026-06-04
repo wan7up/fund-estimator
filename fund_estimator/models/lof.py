@@ -44,6 +44,7 @@ class LofPremiumItem(BaseModel):
     name: str
     fund_type: str | None = None
     theme: str | None = None
+    is_qdii: bool = False
     official_nav: float | None = None
     official_nav_date: str | None = None
     estimated_nav: float | None = None

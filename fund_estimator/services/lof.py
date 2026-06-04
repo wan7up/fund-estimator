@@ -496,9 +496,9 @@ class LofMonitorService:
         limit: int = 80,
         refresh: bool = True,
     ) -> LofOpportunityResponse:
-        cache_key = f"v5:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+        cache_key = f"v6:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
         if not refresh:
-            fallback_key = f"v5:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+            fallback_key = f"v6:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
             cache_keys = [cache_key]
             if fallback_key != cache_key:
                 cache_keys.append(fallback_key)
@@ -512,16 +512,7 @@ class LofMonitorService:
                             "watchlist_count": len(self.list_watchlist(device_id)),
                         }
                     )
-            return LofOpportunityResponse(
-                scanned_at=datetime.now(UTC),
-                normal_threshold_pct=normal_threshold_pct,
-                strong_threshold_pct=strong_threshold_pct,
-                min_turnover_yuan=min_turnover_yuan,
-                core_count=len(CORE_CROSS_BORDER_LOFS),
-                watchlist_count=len(self.list_watchlist(device_id)),
-                items=[],
-                errors=["后台扫描尚未完成，请稍后刷新"],
-            )
+            # Cache misses fall through to a live scan so cache-version bumps do not show an empty monitor pool.
         watchlist = self.list_watchlist(device_id)
         scanned_at = datetime.now(UTC)
         errors: list[str] = []
@@ -675,6 +666,7 @@ class LofMonitorService:
             name=quote.name if quote else f"核心LOF{code}",
             fund_type="QDII-LOF" if config else "LOF",
             theme=config.theme if config else None,
+            is_qdii=config is not None,
             exchange_price=quote.latest_price if quote else None,
             exchange_change_pct=quote.change_pct if quote else None,
             exchange_turnover_yuan=quote.turnover_yuan if quote else None,
@@ -1044,8 +1036,10 @@ class LofMonitorService:
             normal_threshold_pct=normal_threshold_pct,
             strong_threshold_pct=strong_threshold_pct,
         )
-        if level == "strong" and _is_trade_leg_paused(direction, status):
-            level = "normal"
+        if _is_trade_leg_paused(direction, status):
+            level = "none"
+            is_opportunity = False
+        is_qdii = self._is_qdii_item(code=code, profile=profile, config=config)
         risks = self._risks(
             code=code,
             profile=profile,
@@ -1072,6 +1066,7 @@ class LofMonitorService:
             name=profile.name,
             fund_type=profile.fund_type,
             theme=config.theme if config else None,
+            is_qdii=is_qdii,
             official_nav=profile.last_nav,
             official_nav_date=profile.nav_date.isoformat() if profile.nav_date else None,
             estimated_nav=_safe_round(estimated_nav, 4),
@@ -1099,6 +1094,13 @@ class LofMonitorService:
             data_source=f"profile:{profile.source}, quote:{quote.source if quote else 'missing'}, status:{status.source}",
             updated_at=now,
         )
+
+    @staticmethod
+    def _is_qdii_item(*, code: str, profile: FundProfile, config: CoreLof | None) -> bool:
+        if config is not None:
+            return True
+        text = f"{profile.name} {profile.fund_type or ''}".upper()
+        return "QDII" in text
 
     @staticmethod
     def _premium_pct(price: float | None, nav: float | None) -> float | None:

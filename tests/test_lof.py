@@ -211,9 +211,18 @@ def test_lof_scan_discovers_non_core_premium_from_full_market_quotes(tmp_path):
     assert item.name == "核心LOF160999"
     assert item.official_premium_pct == 8.0
     assert item.signal_basis == "official"
-    assert item.is_opportunity is True
-    assert item.level == "normal"
+    assert item.is_opportunity is False
+    assert item.level == "none"
     assert item.actionable is False
+
+
+def test_lof_scan_refresh_false_falls_back_to_live_scan_on_cache_miss(tmp_path):
+    service = make_service(tmp_path)
+
+    response = __import__("asyncio").run(service.get_opportunities(limit=20, refresh=False))
+
+    assert response.items
+    assert not response.errors
 
 
 def test_lof_scan_includes_non_core_lof_below_opportunity_threshold(tmp_path):
@@ -291,6 +300,7 @@ def test_lof_scan_keeps_core_rows_when_profile_fails(tmp_path):
     item = next(row for row in response.items if row.code == "161128")
 
     assert item.name == "核心LOF161128"
+    assert item.is_qdii is True
     assert item.exchange_price == 1.05
     assert item.estimated_premium_pct is None
     assert "基金资料缺失" in item.risks

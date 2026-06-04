@@ -596,10 +596,11 @@ function showErrors(errors) {
 }
 
 function renderStats() {
-  const opportunityCount = state.items.filter((item) => item.is_opportunity).length;
-  const strongCount = state.items.filter((item) => item.level === "strong" && item.actionable).length;
-  const actionableCount = state.items.filter((item) => item.actionable).length;
-  els.statTotal.textContent = state.items.length || "--";
+  const poolItems = applyPurchasePausedFilter(state.items, state.showPurchasePaused);
+  const opportunityCount = poolItems.filter((item) => item.is_opportunity).length;
+  const strongCount = poolItems.filter((item) => item.level === "strong" && item.actionable).length;
+  const actionableCount = poolItems.filter((item) => item.actionable).length;
+  els.statTotal.textContent = poolItems.length || "--";
   els.statOpportunity.textContent = opportunityCount;
   els.statStrong.textContent = strongCount;
   els.statActionable.textContent = actionableCount;
@@ -636,6 +637,14 @@ function signalBadge(item) {
   return `<span class="signal-badge ${cls}">${label}</span>`;
 }
 
+function fundTypeText(item) {
+  return item.theme || item.fund_type || "LOF";
+}
+
+function qdiiBadge(item) {
+  return item.is_qdii ? `<span class="type-badge qdii">QDII</span>` : "";
+}
+
 function renderRows() {
   const items = filteredItems();
   if (!state.items.length) {
@@ -661,7 +670,7 @@ function rowHtml(item, watched) {
       <td>
         <div class="fund-name">
           <strong>${escapeHtml(item.name)}</strong>
-          <small>${item.code} · ${escapeHtml(item.theme || item.fund_type || "LOF")} ${signalBadge(item)}</small>
+          <small>${item.code} · ${escapeHtml(fundTypeText(item))} ${qdiiBadge(item)} ${signalBadge(item)}</small>
         </div>
       </td>
       <td>${fmt(item.exchange_price, 3)}<br><small class="${clsForPct(item.exchange_change_pct || 0)}">${fmtPct(item.exchange_change_pct)}</small></td>
@@ -685,7 +694,7 @@ function cardHtml(item, watched) {
       <div class="card-head">
         <div>
           <strong>${escapeHtml(item.name)}</strong>
-          <small>${item.code} · ${escapeHtml(item.theme || item.fund_type || "LOF")}</small>
+          <small>${item.code} · ${escapeHtml(fundTypeText(item))} ${qdiiBadge(item)}</small>
         </div>
         <button class="watch-btn ${watched ? "active" : ""}" type="button" data-lof-watch="${item.code}" title="${watched ? "移出自选" : "加入自选"}">${watched ? "★" : "☆"}</button>
       </div>
@@ -770,7 +779,7 @@ function renderDetail() {
     return;
   }
   els.detailTitle.textContent = item.name;
-  els.detailMeta.textContent = `${item.code} · ${directionText(item.direction)} · ${signalText(item)}`;
+  els.detailMeta.innerHTML = `${escapeHtml(item.code)} · ${escapeHtml(directionText(item.direction))} · ${escapeHtml(signalText(item))} ${qdiiBadge(item)}`;
   els.detailSummary.innerHTML = lofSummaryHtml(item);
   els.proxyList.innerHTML = proxyMovesHtml(item, "暂无参考标的行情");
   els.riskList.innerHTML = riskListHtml(item);

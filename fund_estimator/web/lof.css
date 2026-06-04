@@ -547,6 +547,7 @@ small {
   color: var(--muted);
 }
 
+.type-badge,
 .signal-badge {
   display: inline-flex;
   align-items: center;
@@ -556,6 +557,11 @@ small {
   background: #edf1f5;
   color: #475467;
   font-size: 12px;
+}
+
+.type-badge.qdii {
+  background: #eaf2ff;
+  color: #1769e0;
 }
 
 .signal-badge.normal {
