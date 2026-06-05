@@ -995,7 +995,7 @@ class LofNoticeService:
                 lines.append("")
             lines.extend(
                 [
-                    f"{item.code} {item.name}",
+                    LofNoticeService._format_item_title(item),
                     f"操作建议：{LofNoticeService._action_advice(item, min_turnover_yuan=min_turnover_yuan)}",
                     f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
                     f"官方净值溢价：{LofNoticeService._format_pct(item.official_premium_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
@@ -1004,13 +1004,18 @@ class LofNoticeService:
         return "\n".join(lines)
 
     @staticmethod
+    def _format_item_title(item: LofPremiumItem) -> str:
+        badge = " [QDII]" if item.is_qdii else ""
+        return f"{item.code}{badge} {item.name}"
+
+    @staticmethod
     def _format_test_fallback(*, now: datetime) -> str:
         local_now = now.astimezone(MARKET_TZ)
         return "\n".join(
             [
                 "【LOF套利机会提醒】",
                 local_now.strftime('%Y-%m-%d %H:%M'),
-                "501312 华宝海外科技股票(QDII-LOF)A",
+                "501312 [QDII] 华宝海外科技股票(QDII-LOF)A",
                 "操作建议：测试通知，当前未取得基金实时数据，仅用于验证飞书连接。",
                 "成交额：--；估算溢价：--",
                 "官方净值溢价：--；申购限额--",
