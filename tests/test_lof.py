@@ -141,6 +141,12 @@ def make_service(tmp_path) -> LofMonitorService:
     )
 
 
+def seed_signal_history(config: LofNoticeConfig, items: list[LofPremiumItem], now: datetime) -> None:
+    state = json.loads(config.state_path.read_text(encoding="utf-8")) if config.state_path.exists() else {}
+    LofNoticeService(config)._record_signal_history(state, items, now=now)
+    config.state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
 def test_lof_opportunity_uses_proxy_estimate_and_flags_risks(tmp_path):
     service = make_service(tmp_path)
 
@@ -426,6 +432,7 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     sent_texts: list[str] = []
     notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
     now = datetime(2026, 5, 29, 2, 5, tzinfo=UTC)
+    seed_signal_history(config, notice._raw_notice_candidates(response), now - timedelta(days=1))
 
     first = notice.notify_daily_summary(response, now=now)
     second = notice.notify_daily_summary(response, now=now + timedelta(minutes=5))
@@ -494,7 +501,7 @@ def test_lof_notice_empty_daily_summary_uses_compact_reason_template(tmp_path):
                 "2026-06-04 09:30",
                 "当前暂无可操作套利机会。",
                 "扫描池：120只",
-                "原因：无发现折价或溢价超过3%且成交额超过300万",
+                "原因：无发现跨扫描日持续折价或溢价超过3%且成交额超过300万",
             ]
         )
     ]
@@ -548,6 +555,7 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
             item("160008", -3.2, 3_000_000),
         ],
     )
+    seed_signal_history(config, notice._raw_notice_candidates(response), now - timedelta(days=1))
 
     result = notice.notify_daily_summary(response, now=now)
 
@@ -567,6 +575,8 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
     assert rows[0]["scan_items"] == 8
     assert rows[0]["scanned_at"] == "2026-06-03T02:04:00+00:00"
+    assert rows[0]["raw_candidate_count"] == 4
+    assert rows[0]["raw_candidate_codes"] == ["160006", "160002", "160001", "160007"]
     assert rows[0]["candidate_codes"] == ["160006", "160002", "160001", "160007"]
 
 
@@ -937,7 +947,9 @@ def test_lof_notice_afternoon_check_sends_once_after_1430(tmp_path):
     sent_texts: list[str] = []
     notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
     now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
-    response = _afternoon_response(now, [_afternoon_notice_item()])
+    item = _afternoon_notice_item()
+    response = _afternoon_response(now, [item])
+    seed_signal_history(config, [item], now - timedelta(days=1))
 
     first = notice.notify_afternoon_check(response, now=now)
     second = notice.notify_afternoon_check(response, now=now + timedelta(minutes=5))
@@ -953,7 +965,34 @@ def test_lof_notice_afternoon_check_sends_once_after_1430(tmp_path):
     assert rows[0]["kind"] == "afternoon_check"
     assert rows[0]["scan_items"] == 1
     assert rows[0]["scanned_at"] == "2026-06-03T06:30:00+00:00"
+    assert rows[0]["raw_candidate_count"] == 1
+    assert rows[0]["raw_candidate_codes"] == ["160001"]
     assert rows[0]["candidate_codes"] == ["160001"]
+
+
+def test_lof_notice_afternoon_check_records_transient_without_sending(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
+    item = _afternoon_notice_item()
+    response = _afternoon_response(now, [item])
+
+    result = notice.notify_afternoon_check(response, now=now)
+
+    assert result["status"] == "no_afternoon_opportunities"
+    assert sent_texts == []
+    assert not config.ledger_path.exists()
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state["last_afternoon_check_date"] == "2026-06-03"
+    assert "160001" in state["signal_history"]["2026-06-03"]["items"]
 
 
 def test_lof_notice_afternoon_check_skips_empty_without_sending(tmp_path):
@@ -1016,7 +1055,9 @@ def test_lof_notice_scheduler_runs_afternoon_after_daily_summary(tmp_path):
     sent_texts: list[str] = []
     notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
     now = datetime(2026, 6, 3, 6, 30, tzinfo=UTC)
-    monitor = DummyNoticeMonitor(_afternoon_response(now, [_afternoon_notice_item("160002", 4.8, 8_000_000)]))
+    item = _afternoon_notice_item("160002", 4.8, 8_000_000)
+    seed_signal_history(config, [item], now - timedelta(days=1))
+    monitor = DummyNoticeMonitor(_afternoon_response(now, [item]))
     scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice)
 
     due_delay = scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 5, tzinfo=UTC))

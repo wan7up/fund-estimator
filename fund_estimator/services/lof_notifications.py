@@ -21,6 +21,7 @@ COOLDOWN_SECONDS = 30 * 60
 SUMMARY_INTERVAL_SECONDS = 10 * 60
 NOTICE_PREMIUM_THRESHOLD_PCT = 3.0
 DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
+SIGNAL_HISTORY_LOOKBACK_DAYS = 10
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
 AFTERNOON_CHECK_TIME = "14:30"
 AFTERNOON_CHECK_WINDOW_SECONDS = 20 * 60
@@ -533,14 +534,15 @@ class LofNoticeService:
             self._write_state(state, result, now=now)
             return result
         rows: list[dict[str, Any]] = []
-        notice_items = self._notice_candidates(response)
+        raw_notice_items = self._raw_notice_candidates(response)
+        notice_items = self._persistent_notice_candidates(raw_notice_items, state=state, now=now)
         for item in notice_items:
             if self._is_instant_candidate(item, min_turnover_yuan=response.min_turnover_yuan):
                 row = self._send_candidate(item, state=state, now=now, reason="instant", min_turnover_yuan=response.min_turnover_yuan)
                 if row is not None:
                     rows.append(row)
         if self._should_send_summary(state, now) and notice_items:
-            row = self._send_summary(response, state=state, now=now)
+            row = self._send_summary(response, state=state, now=now, items=notice_items)
             if row is not None:
                 rows.append(row)
         if rows:
@@ -548,6 +550,7 @@ class LofNoticeService:
         failed = [row for row in rows if str(row.get("status") or "").startswith("failed")]
         sent = [row for row in rows if row.get("status") == "sent"]
         status = "sent" if sent and not failed else "completed_with_failures" if failed else "no_notice"
+        self._record_signal_history(state, raw_notice_items, now=now)
         result = self._state_result(status, now=now, last_error=failed[-1].get("error") if failed else None, rows=rows)
         self._write_state(state, result, now=now)
         return result
@@ -581,10 +584,12 @@ class LofNoticeService:
             self._write_state(state, result, now=now)
             return result
         send_empty = self.config.send_empty_daily_summary if send_empty is None else send_empty
-        items = self._notice_candidates(response)
+        raw_items = self._raw_notice_candidates(response)
+        items = self._persistent_notice_candidates(raw_items, state=state, now=now)
         if not items and not send_empty:
             result = self._state_result("no_actionable_opportunities", now=now, last_error=None, rows=[])
             state["last_daily_summary_date"] = today
+            self._record_signal_history(state, raw_items, now=now)
             self._write_state(state, result, now=now)
             return result
         text = self._format_daily_summary(items, response=response, now=now)
@@ -592,7 +597,7 @@ class LofNoticeService:
             "created_at": now.isoformat(timespec="seconds"),
             "kind": "daily_summary",
             "summary_date": today,
-            **self._scan_ledger_fields(response, items),
+            **self._scan_ledger_fields(response, items, raw_items=raw_items),
             "count": len(items),
             **self._send_feishu_openapi(text, state=state),
         }
@@ -600,6 +605,7 @@ class LofNoticeService:
         if row.get("status") == "sent":
             state["last_daily_summary_date"] = today
             state["last_daily_summary_at"] = now.isoformat(timespec="seconds")
+        self._record_signal_history(state, raw_items, now=now)
         result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
         self._write_state(state, result, now=now)
         return result
@@ -635,11 +641,13 @@ class LofNoticeService:
             result = self._state_result("skipped_after_afternoon_check_window", now=now, last_error=None, rows=[])
             self._write_state(state, result, now=now)
             return result
-        items = self._notice_candidates(response)
+        raw_items = self._raw_notice_candidates(response)
+        items = self._persistent_notice_candidates(raw_items, state=state, now=now)
         if not items:
             result = self._state_result("no_afternoon_opportunities", now=now, last_error=None, rows=[])
             state["last_afternoon_check_date"] = today
             state["last_afternoon_check_at"] = now.isoformat(timespec="seconds")
+            self._record_signal_history(state, raw_items, now=now)
             self._write_state(state, result, now=now)
             return result
         text = self._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
@@ -647,7 +655,7 @@ class LofNoticeService:
             "created_at": now.isoformat(timespec="seconds"),
             "kind": "afternoon_check",
             "summary_date": today,
-            **self._scan_ledger_fields(response, items),
+            **self._scan_ledger_fields(response, items, raw_items=raw_items),
             "count": len(items),
             **self._send_feishu_openapi(text, state=state),
         }
@@ -655,6 +663,7 @@ class LofNoticeService:
         if row.get("status") == "sent":
             state["last_afternoon_check_date"] = today
             state["last_afternoon_check_at"] = now.isoformat(timespec="seconds")
+        self._record_signal_history(state, raw_items, now=now)
         result = self._state_result(row["status"], now=now, last_error=row.get("error"), rows=[row])
         self._write_state(state, result, now=now)
         return result
@@ -742,13 +751,75 @@ class LofNoticeService:
         return f"{item.code}:{direction}:{level}"
 
     @classmethod
-    def _notice_candidates(cls, response: LofOpportunityResponse) -> list[LofPremiumItem]:
+    def _raw_notice_candidates(cls, response: LofOpportunityResponse) -> list[LofPremiumItem]:
         items = [
             item
             for item in response.items
             if cls._is_notice_candidate(item, min_turnover_yuan=response.min_turnover_yuan)
         ]
         return sorted(items, key=cls._notice_sort_key)
+
+    def _persistent_notice_candidates(
+        self,
+        items: list[LofPremiumItem],
+        *,
+        state: dict[str, Any],
+        now: datetime,
+    ) -> list[LofPremiumItem]:
+        return [item for item in items if self._has_prior_same_direction_signal(item, state=state, now=now)]
+
+    def _has_prior_same_direction_signal(self, item: LofPremiumItem, *, state: dict[str, Any], now: datetime) -> bool:
+        premium = self._notice_premium_pct(item)
+        if premium is None:
+            return False
+        direction = "premium" if premium > 0 else "discount"
+        local_date = now.astimezone(MARKET_TZ).date()
+        history = state.get("signal_history") if isinstance(state.get("signal_history"), dict) else {}
+        for day_key, day_payload in history.items():
+            try:
+                day = date.fromisoformat(str(day_key))
+            except ValueError:
+                continue
+            if day >= local_date or (local_date - day).days > SIGNAL_HISTORY_LOOKBACK_DAYS:
+                continue
+            day_items = day_payload.get("items") if isinstance(day_payload, dict) else {}
+            prior = day_items.get(item.code) if isinstance(day_items, dict) else None
+            if not isinstance(prior, dict):
+                continue
+            prior_premium = _parse_float(prior.get("premium_pct"))
+            if prior.get("direction") == direction and prior_premium is not None and abs(prior_premium) > NOTICE_PREMIUM_THRESHOLD_PCT:
+                return True
+        return False
+
+    def _record_signal_history(self, state: dict[str, Any], items: list[LofPremiumItem], *, now: datetime) -> None:
+        local_date = now.astimezone(MARKET_TZ).date()
+        history = state.get("signal_history") if isinstance(state.get("signal_history"), dict) else {}
+        history = dict(history)
+        day_items: dict[str, dict[str, Any]] = {}
+        for item in items:
+            premium = self._notice_premium_pct(item)
+            if premium is None:
+                continue
+            day_items[item.code] = {
+                "direction": "premium" if premium > 0 else "discount",
+                "premium_pct": round(float(premium), 4),
+                "turnover_yuan": item.exchange_turnover_yuan,
+                "purchase_status": item.purchase_status,
+                "name": item.name,
+            }
+        history[local_date.isoformat()] = {
+            "recorded_at": now.isoformat(timespec="seconds"),
+            "items": day_items,
+        }
+        pruned: dict[str, Any] = {}
+        for day_key, day_payload in history.items():
+            try:
+                day = date.fromisoformat(str(day_key))
+            except ValueError:
+                continue
+            if (local_date - day).days <= SIGNAL_HISTORY_LOOKBACK_DAYS:
+                pruned[day_key] = day_payload
+        state["signal_history"] = pruned
 
     @classmethod
     def _is_instant_candidate(cls, item: LofPremiumItem, *, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> bool:
@@ -805,8 +876,15 @@ class LofNoticeService:
             cooldowns[key] = (now + timedelta(seconds=COOLDOWN_SECONDS)).isoformat(timespec="seconds")
         return row
 
-    def _send_summary(self, response: LofOpportunityResponse, *, state: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-        items = self._notice_candidates(response)[:8]
+    def _send_summary(
+        self,
+        response: LofOpportunityResponse,
+        *,
+        state: dict[str, Any],
+        now: datetime,
+        items: list[LofPremiumItem] | None = None,
+    ) -> dict[str, Any] | None:
+        items = (items if items is not None else self._persistent_notice_candidates(self._raw_notice_candidates(response), state=state, now=now))[:8]
         if not items:
             return None
         text = self._format_summary(items, response=response)
@@ -865,10 +943,18 @@ class LofNoticeService:
         return "\n".join(lines)
 
     @staticmethod
-    def _scan_ledger_fields(response: LofOpportunityResponse, items: list[LofPremiumItem]) -> dict[str, Any]:
+    def _scan_ledger_fields(
+        response: LofOpportunityResponse,
+        items: list[LofPremiumItem],
+        *,
+        raw_items: list[LofPremiumItem] | None = None,
+    ) -> dict[str, Any]:
+        raw_items = raw_items or []
         return {
             "scanned_at": response.scanned_at.isoformat(timespec="seconds"),
             "scan_items": len(response.items),
+            "raw_candidate_count": len(raw_items),
+            "raw_candidate_codes": [item.code for item in raw_items[:20]],
             "candidate_codes": [item.code for item in items[:20]],
         }
 
@@ -890,7 +976,7 @@ class LofNoticeService:
                     local_now.strftime('%Y-%m-%d %H:%M'),
                     "当前暂无可操作套利机会。",
                     f"扫描池：{len(response.items)}只",
-                    f"原因：无发现折价或溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%且成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}",
+                    f"原因：无发现跨扫描日持续折价或溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%且成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}",
                 ]
             )
         return LofNoticeService._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
