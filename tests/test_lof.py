@@ -225,6 +225,15 @@ def test_lof_scan_refresh_false_falls_back_to_live_scan_on_cache_miss(tmp_path):
     assert not response.errors
 
 
+def test_lof_scan_cache_key_normalizes_integer_turnover(tmp_path):
+    service = make_service(tmp_path)
+
+    __import__("asyncio").run(service.get_opportunities(limit=20, min_turnover_yuan=3_000_000.0))
+
+    assert service.cache.get("lof_opportunity_scan", "v6:default:2.0:5.0:3000000", include_expired=True) is not None
+    assert service.cache.get("lof_opportunity_scan", "v6:default:2.0:5.0:3000000.0", include_expired=True) is None
+
+
 def test_lof_scan_includes_non_core_lof_below_opportunity_threshold(tmp_path):
     service = make_service(tmp_path)
 
@@ -555,6 +564,10 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "成交额：800万；估算溢价：-4.50%" in sent_texts[0]
     assert "操作建议：折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。" in sent_texts[0]
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
+    rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["scan_items"] == 8
+    assert rows[0]["scanned_at"] == "2026-06-03T02:04:00+00:00"
+    assert rows[0]["candidate_codes"] == ["160006", "160002", "160001", "160007"]
 
 
 def test_daily_summary_schedule_skips_after_same_day_send(tmp_path):
@@ -938,6 +951,9 @@ def test_lof_notice_afternoon_check_sends_once_after_1430(tmp_path):
     assert state["last_afternoon_check_date"] == "2026-06-03"
     rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
     assert rows[0]["kind"] == "afternoon_check"
+    assert rows[0]["scan_items"] == 1
+    assert rows[0]["scanned_at"] == "2026-06-03T06:30:00+00:00"
+    assert rows[0]["candidate_codes"] == ["160001"]
 
 
 def test_lof_notice_afternoon_check_skips_empty_without_sending(tmp_path):

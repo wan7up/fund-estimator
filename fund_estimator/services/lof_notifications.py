@@ -592,6 +592,7 @@ class LofNoticeService:
             "created_at": now.isoformat(timespec="seconds"),
             "kind": "daily_summary",
             "summary_date": today,
+            **self._scan_ledger_fields(response, items),
             "count": len(items),
             **self._send_feishu_openapi(text, state=state),
         }
@@ -646,6 +647,7 @@ class LofNoticeService:
             "created_at": now.isoformat(timespec="seconds"),
             "kind": "afternoon_check",
             "summary_date": today,
+            **self._scan_ledger_fields(response, items),
             "count": len(items),
             **self._send_feishu_openapi(text, state=state),
         }
@@ -861,6 +863,14 @@ class LofNoticeService:
             if len(calendar.bonds) > 10:
                 lines.append(f"另有 {len(calendar.bonds) - 10} 只新债未列出。")
         return "\n".join(lines)
+
+    @staticmethod
+    def _scan_ledger_fields(response: LofOpportunityResponse, items: list[LofPremiumItem]) -> dict[str, Any]:
+        return {
+            "scanned_at": response.scanned_at.isoformat(timespec="seconds"),
+            "scan_items": len(response.items),
+            "candidate_codes": [item.code for item in items[:20]],
+        }
 
     @staticmethod
     def _format_candidate(item: LofPremiumItem, *, reason: str, min_turnover_yuan: float = DEFAULT_NOTICE_MIN_TURNOVER_YUAN) -> str:

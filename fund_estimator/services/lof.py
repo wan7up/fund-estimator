@@ -486,6 +486,16 @@ class LofMonitorService:
             raise AppError("INVALID_WATCHLIST_ORDER", "LOF 自选排序列表必须与当前自选完全一致", status_code=422)
         return self.list_watchlist(device_id)
 
+    @staticmethod
+    def _cache_number(value: float | int) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:g}"
+
     async def get_opportunities(
         self,
         *,
@@ -496,9 +506,10 @@ class LofMonitorService:
         limit: int = 80,
         refresh: bool = True,
     ) -> LofOpportunityResponse:
-        cache_key = f"v6:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+        min_turnover_key = self._cache_number(min_turnover_yuan)
+        cache_key = f"v6:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
         if not refresh:
-            fallback_key = f"v6:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_yuan}"
+            fallback_key = f"v6:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
             cache_keys = [cache_key]
             if fallback_key != cache_key:
                 cache_keys.append(fallback_key)
