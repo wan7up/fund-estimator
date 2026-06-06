@@ -225,11 +225,11 @@ def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
     login = client.post("/api/compare/ai/login", json={"password": "secret"})
     invalid_config = client.put(
         "/api/compare/ai/config",
-        json={"base_url": "http://127.0.0.1:8000/v1", "api_key": "sk-test"},
+        json={"base_url": "http://127.0.0.1:8000/v1", "api_key": "test-api-key-unit"},
     )
     config = client.put(
         "/api/compare/ai/config",
-        json={"base_url": "http://api.example.com/v1", "api_key": "sk-test-123456"},
+        json={"base_url": "http://api.example.com/v1", "api_key": "test-api-key-123456"},
     )
     models = client.get("/api/compare/ai/models")
     configured = client.put(
@@ -244,7 +244,7 @@ def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
     assert invalid_config.status_code == 422
     assert config.status_code == 200
     assert config.json()["base_url_is_http"] is True
-    assert config.json()["api_key_masked"] == "sk-tes...3456"
+    assert config.json()["api_key_masked"] == "test-a...3456"
     assert config.json()["configured"] is False
     assert models.json()["models"] == ["gpt-test", "gpt-test-mini"]
     assert configured.json()["configured"] is True

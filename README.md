@@ -1,29 +1,28 @@
 # 基金工具箱
 
-一个面向手机访问的本地/服务器基金工具合集。当前统一到同一个首页，顶部三个标签分别进入：
+基金工具箱是一个面向手机浏览器和自部署服务器的基金辅助看板。项目使用 FastAPI 提供 API 和静态页面，默认首页集成三个工具：
 
-- `场外估值`：国内场外公募基金盘中实时估值预测器。
-- `套利监控`：核心跨境 LOF 与 ETF 溢价/折价监控。
-- `基金对比`：2-4 只基金的基础画像、评分和相似度对比。
+- `实时估值`：根据国内场外公募基金披露持仓和实时行情估算盘中净值。
+- `基金对比`：对 2-4 只基金做基础画像、评分、相似度和差异点对比。
+- `套利提醒`：监控跨境 LOF/ETF 的场内溢价、折价、申购赎回状态和通知机会。
 
 > **基于公开持仓和实时行情计算的估算净值，不是基金公司公布的官方净值，仅供研究和参考，不构成投资建议。**
 
 ## 功能
 
-- 单页工具台：`/` 默认展示场外估值，`/estimate`、`/arbitrage`、`/compare` 可直达对应标签。
-- 多 session 协作边界见 `协作说明.md`；动工前运行 `scripts/check_session_scope.py <scope> --preflight`，收尾前运行普通范围检查。
+- 单页工具台：`/` 默认展示实时估值，`/estimate`、`/compare`、`/arbitrage` 可直达对应标签。
 - 基金代码/名称搜索。
-- 单用户本地自选基金列表。
+- 按浏览器设备 ID 分组的自选基金列表，适合个人或小团队自部署使用。
 - 单基金和批量实时估值。
 - 披露权重与前十归一两种估值口径。
-- 前十大持仓贡献拆解、前十股票占净值比、估值置信度和风险说明。
-- 页面聚焦自选基金估值、官方净值、官方涨跌、预计估值、预计涨跌、前十股票占净值比和估值置信度。
-- 支持跳转天天基金手机版和好买基金手机版，完整基金档案优先使用外部平台查看。
+- 前十大持仓贡献拆解、前十股票占净值比和风险说明。
+- 页面聚焦自选基金估值、官方净值、官方涨跌、预计估值、预计涨跌和前十股票占净值比。
+- 支持跳转好买基金手机版，完整基金档案优先使用外部平台查看。
 - Web 页面在 A 股开市期间每 15 秒自动刷新估算净值。
 - SQLite 缓存基金信息、净值、持仓和短时行情。
 - FastAPI HTTP API 与内置 Web 看板。
-- 第二个工具页：核心跨境 LOF 溢价监控、自选 LOF、代理 IOPV 估算、风险标记和飞书 OpenAPI 通知。
-- 第三个工具页：基金对比器。
+- 基金对比页支持可选 AI 短评，API Key 只保存在部署实例本地数据目录。
+- 套利提醒页支持可选飞书 OpenAPI 通知，飞书凭证只保存在部署实例本地数据目录。
 - 轻量 PWA：支持 iOS Safari 添加到主屏幕，提供 manifest 和自定义图标；不离线缓存实时行情。
 
 ## 快速启动
@@ -36,13 +35,15 @@
 
 打开 `http://127.0.0.1:8000`。
 
-Docker Compose：
+Docker Compose 快速体验：
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.quickstart.yml up -d --build
 ```
 
 打开 `http://服务器IP:8000`。SQLite 数据默认保存在 `./data/fund_estimator.sqlite3`。
+
+仓库里的 `docker-compose.yml` 是带 HTTPS 反代的生产模板，适合已经准备好证书和 Nginx 配置的服务器；第一次部署建议先使用 `docker-compose.quickstart.yml`。
 
 默认启动会连接真实东方财富/天天基金数据源。离线演示可强制使用内置 mock 数据：
 
@@ -84,6 +85,11 @@ $env:FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK = '1'
 - `POST /api/lof/notice/test`
 - `GET /api/etf/opportunities`
 - `POST /api/compare`
+- `GET /api/compare/ai/status`
+- `POST /api/compare/ai/login`
+- `PUT /api/compare/ai/config`
+- `GET /api/compare/ai/models`
+- `POST /api/compare/ai/commentary`
 
 示例：
 
@@ -122,8 +128,7 @@ $env:FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK = '1'
 - `官方涨跌`：数据源披露的最新官方净值日涨跌幅，日期为最新官方净值日期。
 - `前十股票涨跌`：将可估值的前十大股票持仓归一到 100% 后的组合涨跌，用来观察这些股票本身当天怎么走。
 - `前十股票占净值比`：前十大股票持仓权重合计，字段来自东方财富持仓表的“占净值比例”。该值可能很低，通常说明基金股票仓位低、持仓分散，或前十股票只占基金净值的一小部分。
-- `估值置信度`：只评价“持仓穿透估算”的可信程度，不评价基金本身好坏。
-- `外部详情`：天天基金使用手机版 `https://unitmob.1234567.com.cn/mpz/detail.html?code={基金代码}`；好买基金使用手机版 `https://m.howbuy.com/fund/{基金代码}/`。
+- `外部详情`：好买基金使用手机版 `https://m.howbuy.com/fund/{基金代码}/`。
 
 披露权重口径直接使用持仓披露权重：
 
@@ -169,6 +174,25 @@ estimated_nav = last_nav * (1 + r_top10)
 - `LOF_FEISHU_TIMEOUT_SECONDS=30`：飞书接入和发送接口超时时间。
 - `LOF_NOTICE_DAILY_SUMMARY_TIME=10:00`：每日固定摘要时间，页面里的飞书通知设置会覆盖这个默认值。
 - `LOF_NOTICE_SEND_EMPTY_DAILY_SUMMARY=1`：无可操作机会时也发送一条简短确认。
+- `FUND_ESTIMATOR_COMPARE_AI_PASSWORD`：基金对比 AI 配置页管理密码；不设置时 AI 配置功能关闭。
+
+## 敏感信息
+
+公开仓库不应包含任何真实凭证。以下内容必须只放在服务器环境变量或运行时数据目录中：
+
+- Cloudflare API Token、GitHub Token、SSH 私钥。
+- OpenAI 或兼容模型服务的 API Key。
+- 飞书 App ID/App Secret、tenant access token、用户 open_id。
+- `data/` 目录、SQLite 数据库、飞书通知状态文件、AI 配置文件和会话文件。
+
+本仓库通过 `.gitignore` 和 `.dockerignore` 默认忽略这些运行时文件。提交前建议至少执行：
+
+```bash
+git status --short
+git grep -n -I -E 'cfut_|ghp_|github_pat_|AKIA|AIza|xox[baprs]-|sk-[A-Za-z0-9_-]{12,}|tenant_access_token|app_secret'
+```
+
+如果误提交过真实密钥，应立即在对应平台撤销并重新生成；仅从最新提交删除文件不能让历史中的密钥失效。
 
 ## LOF 溢价监控
 

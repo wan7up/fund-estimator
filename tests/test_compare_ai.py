@@ -74,13 +74,13 @@ def test_config_masks_key_and_session_expires(tmp_path):
     token = service.login("pw")
 
     status = service.update_config(
-        CompareAiConfigUpdate(base_url="http://api.example.com/v1", api_key="sk-abcdef123456"),
+        CompareAiConfigUpdate(base_url="http://api.example.com/v1", api_key="test-api-key-abcdef123456"),
         token,
     )
 
     assert status.authenticated is True
     assert status.base_url_is_http is True
-    assert status.api_key_masked == "sk-abc...3456"
+    assert status.api_key_masked == "test-a...3456"
     assert "api_key" not in status.model_dump()
 
     service._write_sessions(
@@ -96,7 +96,7 @@ def test_models_and_commentary_use_saved_config(tmp_path):
     service.update_config(
         CompareAiConfigUpdate(
             base_url="http://api.example.com/v1",
-            api_key="sk-test",
+            api_key="test-api-key-unit",
             selected_model="gpt-test",
             persona_id="marks_cycle",
         ),
@@ -123,7 +123,7 @@ def test_prompt_preserves_rule_boundaries(tmp_path):
     service = CompareAiService(data_dir=tmp_path, admin_password="pw")
     config = service._read_config()
     config.selected_model = "gpt-test"
-    config.api_key = "sk-test"
+    config.api_key = "test-api-key-unit"
 
     messages = service._build_messages(
         CompareAiCommentaryRequest(compare_result=compare_response("not_comparable")),
