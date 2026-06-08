@@ -526,6 +526,11 @@ class LofNoticeService:
                 keys.add(str(key))
         return keys
 
+    def signal_history(self) -> dict[str, Any]:
+        state = read_json(self.config.state_path, {})
+        history = state.get("signal_history")
+        return history if isinstance(history, dict) else {}
+
     def notify_from_scan(self, response: LofOpportunityResponse, *, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(UTC)
         state = read_json(self.config.state_path, {})

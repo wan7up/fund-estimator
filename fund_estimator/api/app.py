@@ -155,6 +155,7 @@ def create_lof_monitor_service(
             proxy_source=MockLofProxyDataSource(),
             haoetf_source=MockHaoEtfDataSource(),
             notice_cooldown_reader=notice_service.active_cooldown_keys if notice_service else None,
+            notice_signal_history_reader=notice_service.signal_history if notice_service else None,
         )
     return LofMonitorService(
         estimator=estimator,
@@ -164,6 +165,7 @@ def create_lof_monitor_service(
         ),
         discovery_market_source=EastmoneyLofMarketDataSource(timeout=2.5),
         notice_cooldown_reader=notice_service.active_cooldown_keys if notice_service else None,
+        notice_signal_history_reader=notice_service.signal_history if notice_service else None,
     )
 
 

@@ -165,6 +165,82 @@ def test_lof_opportunity_uses_proxy_estimate_and_flags_risks(tmp_path):
     assert "QDII/跨市场时间差" in item.risks
 
 
+def test_non_qdii_official_discount_waits_for_cross_day_confirmation(tmp_path):
+    service = make_service(tmp_path)
+    now = datetime(2026, 6, 8, 6, 30, tzinfo=UTC)
+    profile = FundProfile(
+        code="161005",
+        name="富国天惠成长混合(LOF)A",
+        fund_type="混合型-偏股",
+        nav_date=date(2026, 6, 5),
+        last_nav=1.0,
+        previous_nav_date=date(2026, 6, 4),
+        previous_nav=1.0,
+        actual_change_pct=0.0,
+        source="mock",
+    )
+    quote = LofMarketQuote(
+        code="161005",
+        name="富国天惠",
+        latest_price=0.96,
+        previous_close=1.0,
+        change_pct=-2.0,
+        turnover_yuan=5_000_000,
+        quote_time=now,
+        market="SZ",
+        source="mock",
+    )
+    status = LofTradingStatus(
+        purchase_status="unknown",
+        redemption_status="开放",
+        daily_purchase_limit_yuan=20_000,
+        fee_rate_pct=0.15,
+        source="mock",
+    )
+
+    item = service._build_item(
+        code="161005",
+        profile=profile,
+        quote=quote,
+        status=status,
+        haoetf_snapshot=None,
+        proxy_changes={},
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        cooldown_keys=set(),
+        signal_history={},
+        now=now,
+    )
+
+    assert item.is_qdii is False
+    assert item.estimated_premium_pct is None
+    assert item.official_premium_pct == -4.0
+    assert item.signal_basis == "official"
+    assert item.direction == "discount"
+    assert item.is_opportunity is True
+    assert item.actionable is False
+    assert "非QDII官方折价候选，等待跨日确认" in item.risks
+
+    confirmed = service._build_item(
+        code="161005",
+        profile=profile,
+        quote=quote,
+        status=status,
+        haoetf_snapshot=None,
+        proxy_changes={},
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        cooldown_keys=set(),
+        signal_history={"2026-06-07": {"items": {"161005": {"direction": "discount"}}}},
+        now=now,
+    )
+
+    assert confirmed.actionable is True
+    assert "非QDII官方折价候选，等待跨日确认" not in confirmed.risks
+
+
 def test_lof_watchlist_is_device_scoped(tmp_path):
     service = make_service(tmp_path)
 

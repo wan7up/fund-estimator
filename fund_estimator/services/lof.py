@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time as datetime_time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
 import httpx
@@ -46,6 +47,7 @@ DEFAULT_STRONG_THRESHOLD_PCT = 5.0
 DISCOVERY_MAX_CODES = 500
 DISCOVERY_DEEP_PROFILE_MAX_CODES = 80
 TRADING_PAUSED = "\u6682\u505c"
+MARKET_TZ = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass(frozen=True)
@@ -452,6 +454,7 @@ class LofMonitorService:
         haoetf_source: Any | None = None,
         discovery_market_source: Any | None = None,
         notice_cooldown_reader: Callable[[], set[str]] | None = None,
+        notice_signal_history_reader: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.estimator = estimator
         self.cache = cache
@@ -463,6 +466,7 @@ class LofMonitorService:
             self.market_source if hasattr(self.market_source, "get_all_quotes") else EastmoneyLofMarketDataSource()
         )
         self.notice_cooldown_reader = notice_cooldown_reader
+        self.notice_signal_history_reader = notice_signal_history_reader
 
     async def search_lofs(self, query: str) -> list[FundSearchResult]:
         results = await self.estimator.search_funds(query)
@@ -555,6 +559,7 @@ class LofMonitorService:
         haoetf_map = await self._get_haoetf_snapshots(deep_codes, errors)
         proxy_map = await self._get_proxy_changes(deep_codes, errors, profiles=profile_map)
         cooldown_keys = self.notice_cooldown_reader() if self.notice_cooldown_reader else set()
+        signal_history = self.notice_signal_history_reader() if self.notice_signal_history_reader else {}
         items: list[LofPremiumItem] = []
         for code in codes:
             profile_result = profile_result_map.get(code)
@@ -602,6 +607,7 @@ class LofMonitorService:
                 strong_threshold_pct=strong_threshold_pct,
                 min_turnover_yuan=min_turnover_yuan,
                 cooldown_keys=cooldown_keys,
+                signal_history=signal_history,
                 now=scanned_at,
             )
             items.append(item)
@@ -708,6 +714,7 @@ class LofMonitorService:
         haoetf_map = await self._get_haoetf_snapshots([code], [])
         proxy_map = await self._get_proxy_changes([code], [], profiles={code: profile})
         status = await self._get_status(code, profile)
+        now = datetime.now(UTC)
         return self._build_item(
             code=code,
             profile=profile,
@@ -719,7 +726,8 @@ class LofMonitorService:
             strong_threshold_pct=DEFAULT_STRONG_THRESHOLD_PCT,
             min_turnover_yuan=DEFAULT_MIN_TURNOVER_YUAN,
             cooldown_keys=set(),
-            now=datetime.now(UTC),
+            signal_history=self.notice_signal_history_reader() if self.notice_signal_history_reader else {},
+            now=now,
         )
 
     async def _get_profile(self, code: str) -> FundProfile:
@@ -981,6 +989,7 @@ class LofMonitorService:
         strong_threshold_pct: float,
         min_turnover_yuan: float,
         cooldown_keys: set[str],
+        signal_history: dict[str, Any] | None,
         now: datetime,
     ) -> LofPremiumItem:
         config = CORE_LOF_BY_CODE.get(code)
@@ -1051,6 +1060,14 @@ class LofMonitorService:
             level = "none"
             is_opportunity = False
         is_qdii = self._is_qdii_item(code=code, profile=profile, config=config)
+        needs_cross_day_confirmation = self._needs_cross_day_confirmation(
+            code=code,
+            signal_basis=signal_basis,
+            direction=direction,
+            is_qdii=is_qdii,
+            signal_history=signal_history or {},
+            now=now,
+        )
         risks = self._risks(
             code=code,
             profile=profile,
@@ -1062,6 +1079,7 @@ class LofMonitorService:
             level=level,
             min_turnover_yuan=min_turnover_yuan,
             cooldown_keys=cooldown_keys,
+            needs_cross_day_confirmation=needs_cross_day_confirmation,
         )
         actionable = bool(
             is_opportunity
@@ -1069,6 +1087,7 @@ class LofMonitorService:
             and quote.latest_price is not None
             and (quote.turnover_yuan or 0) >= min_turnover_yuan
             and "代理行情缺失" not in risks
+            and not needs_cross_day_confirmation
             and not (direction == "premium" and status.purchase_status == "暂停")
             and "通知冷却中" not in risks
         )
@@ -1114,6 +1133,49 @@ class LofMonitorService:
         return "QDII" in text
 
     @staticmethod
+    def _needs_cross_day_confirmation(
+        *,
+        code: str,
+        signal_basis: str,
+        direction: str,
+        is_qdii: bool,
+        signal_history: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        if signal_basis != "official" or direction != "discount" or is_qdii:
+            return False
+        return not LofMonitorService._has_prior_same_direction_signal(
+            code=code,
+            direction=direction,
+            signal_history=signal_history,
+            now=now,
+        )
+
+    @staticmethod
+    def _has_prior_same_direction_signal(
+        *,
+        code: str,
+        direction: str,
+        signal_history: dict[str, Any],
+        now: datetime,
+    ) -> bool:
+        local_date = now.astimezone(MARKET_TZ).date()
+        for day_key, day_payload in signal_history.items():
+            try:
+                day = date.fromisoformat(str(day_key))
+            except ValueError:
+                continue
+            if day >= local_date:
+                continue
+            day_items = day_payload.get("items") if isinstance(day_payload, dict) else {}
+            prior = day_items.get(code) if isinstance(day_items, dict) else None
+            if not isinstance(prior, dict):
+                continue
+            if prior.get("direction") == direction:
+                return True
+        return False
+
+    @staticmethod
     def _premium_pct(price: float | None, nav: float | None) -> float | None:
         if price is None or nav is None or nav <= 0:
             return None
@@ -1136,6 +1198,7 @@ class LofMonitorService:
         level: str,
         min_turnover_yuan: float,
         cooldown_keys: set[str],
+        needs_cross_day_confirmation: bool = False,
     ) -> list[str]:
         risks: list[str] = []
         if exchange_price is None:
@@ -1154,6 +1217,8 @@ class LofMonitorService:
             risks.append(f"申购{status.purchase_status}")
         if status.redemption_status == "暂停":
             risks.append("赎回暂停")
+        if needs_cross_day_confirmation:
+            risks.append("非QDII官方折价候选，等待跨日确认")
         if status.warning:
             risks.append(status.warning)
         if level != "none" and self._cooldown_key(code, direction, level) in cooldown_keys:
