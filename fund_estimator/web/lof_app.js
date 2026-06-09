@@ -678,7 +678,7 @@ function rowHtml(item, watched) {
       <td class="${clsForPct(item.estimated_premium_pct || 0)}"><strong>${fmtPct(item.estimated_premium_pct)}</strong></td>
       <td class="${clsForPct(item.official_premium_pct || 0)}">${fmtPct(item.official_premium_pct)}<br><small>${item.official_nav_date || "--"}</small></td>
       <td class="${clsForPct(referenceChange(item) || 0)}">${referenceText(item)}<br><small>${referencePeriodText(item)}</small></td>
-      <td>${fmtMoney(item.exchange_turnover_yuan)}</td>
+      <td>${fmtMoney(item.exchange_turnover_yuan)}<br><small>换手 ${fmtPct(item.exchange_turnover_rate_pct)}</small></td>
       <td>${statusCell(item)}</td>
       <td>${riskTags(item)}</td>
       <td class="row-actions">
@@ -762,7 +762,7 @@ function lofSummaryHtml(item) {
     ${metric("官方净值溢价", fmtPct(item.official_premium_pct), `${fmt(item.official_nav, 4)} / ${item.official_nav_date || "--"}`, clsForPct(item.official_premium_pct || 0), OFFICIAL_PREMIUM_HINT)}
     ${metric("折算关系", fmtPct(relationPremium), `官方 ${fmtPct(item.official_premium_pct)} / 标的 ${referenceText(item)}`, clsForPct(relationPremium || 0), "按 (1+官方净值溢价)/(1+参考标的期间涨幅)-1 折算")}
     ${metric("场内价格", fmt(item.exchange_price, 3), fmtPct(item.exchange_change_pct), clsForPct(item.exchange_change_pct || 0))}
-    ${metric("成交额", fmtMoney(item.exchange_turnover_yuan), `申购 ${statusText(item.purchase_status)} / 赎回 ${statusText(item.redemption_status)}`)}
+    ${metric("成交额", fmtMoney(item.exchange_turnover_yuan), `换手率 ${fmtPct(item.exchange_turnover_rate_pct)} · 申购 ${statusText(item.purchase_status)} / 赎回 ${statusText(item.redemption_status)}`)}
     ${metric("信号", directionText(item.direction), `${signalText(item)} · ${fmtPct(premium)}`)}
     ${metric("日限额", fmtMoney(item.daily_purchase_limit_yuan), item.fee_rate_pct === null || item.fee_rate_pct === undefined ? "费率 --" : `费率 ${fmt(item.fee_rate_pct, 2)}%`)}`;
 }

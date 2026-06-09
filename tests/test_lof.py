@@ -8,7 +8,7 @@ from fund_estimator.models.lof import LofMarketQuote, LofOpportunityResponse, Lo
 from fund_estimator.models.schema import FundProfile, FundSearchResult
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
-from fund_estimator.services.lof import EastmoneyLofTradingStatusDataSource, LofMonitorService
+from fund_estimator.services.lof import EastmoneyLofMarketDataSource, EastmoneyLofTradingStatusDataSource, LofMonitorService
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
 from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
 from fund_estimator.services.lof_notifications import LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
@@ -186,6 +186,7 @@ def test_non_qdii_official_discount_waits_for_cross_day_confirmation(tmp_path):
         previous_close=1.0,
         change_pct=-2.0,
         turnover_yuan=5_000_000,
+        turnover_rate_pct=0.86,
         quote_time=now,
         market="SZ",
         source="mock",
@@ -219,10 +220,12 @@ def test_non_qdii_official_discount_waits_for_cross_day_confirmation(tmp_path):
     assert item.signal_basis == "official"
     assert item.direction == "discount"
     assert item.is_opportunity is True
+    assert item.exchange_turnover_rate_pct == 0.86
     assert item.actionable is False
+    assert "换手率不足10%" in item.risks
     assert "非QDII官方折价候选，等待跨日确认" in item.risks
 
-    confirmed = service._build_item(
+    low_turnover_confirmed = service._build_item(
         code="161005",
         profile=profile,
         quote=quote,
@@ -237,8 +240,51 @@ def test_non_qdii_official_discount_waits_for_cross_day_confirmation(tmp_path):
         now=now,
     )
 
+    assert low_turnover_confirmed.actionable is False
+    assert "换手率不足10%" in low_turnover_confirmed.risks
+    assert "非QDII官方折价候选，等待跨日确认" not in low_turnover_confirmed.risks
+
+    active_quote = quote.model_copy(update={"turnover_rate_pct": 12.0})
+    confirmed = service._build_item(
+        code="161005",
+        profile=profile,
+        quote=active_quote,
+        status=status,
+        haoetf_snapshot=None,
+        proxy_changes={},
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        cooldown_keys=set(),
+        signal_history={"2026-06-07": {"items": {"161005": {"direction": "discount"}}}},
+        now=now,
+    )
+
+    assert confirmed.exchange_turnover_rate_pct == 12.0
     assert confirmed.actionable is True
+    assert "换手率不足10%" not in confirmed.risks
     assert "非QDII官方折价候选，等待跨日确认" not in confirmed.risks
+
+    neutral_quote = quote.model_copy(update={'latest_price': 1.0164})
+    neutral = service._build_item(
+        code='161005',
+        profile=profile,
+        quote=neutral_quote,
+        status=status,
+        haoetf_snapshot=None,
+        proxy_changes={},
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        cooldown_keys=set(),
+        signal_history={},
+        now=now,
+    )
+
+    assert neutral.direction == 'neutral'
+    assert neutral.is_opportunity is False
+    assert '换手率不足10%' not in neutral.risks
+    assert '非QDII官方信号，等待跨日确认' not in neutral.risks
 
 
 def test_lof_watchlist_is_device_scoped(tmp_path):
@@ -312,8 +358,8 @@ def test_lof_scan_cache_key_normalizes_integer_turnover(tmp_path):
 
     __import__("asyncio").run(service.get_opportunities(limit=20, min_turnover_yuan=3_000_000.0))
 
-    assert service.cache.get("lof_opportunity_scan", "v6:default:2.0:5.0:3000000", include_expired=True) is not None
-    assert service.cache.get("lof_opportunity_scan", "v6:default:2.0:5.0:3000000.0", include_expired=True) is None
+    assert service.cache.get("lof_opportunity_scan", "v7:default:2.0:5.0:3000000", include_expired=True) is not None
+    assert service.cache.get("lof_opportunity_scan", "v7:default:2.0:5.0:3000000.0", include_expired=True) is None
 
 
 def test_lof_scan_includes_non_core_lof_below_opportunity_threshold(tmp_path):
@@ -336,6 +382,27 @@ def test_lof_scan_excludes_closed_end_funds_from_display_pool(tmp_path):
     codes = {row.code for row in response.items}
     assert "501046" not in codes
     assert "501062" not in codes
+
+
+def test_eastmoney_lof_quote_parses_turnover_rate():
+    quote = EastmoneyLofMarketDataSource._quote_from_row(
+        {
+            "f12": "161005",
+            "f13": "0",
+            "f14": "富国天惠LOF",
+            "f2": 3.121,
+            "f3": 2.6,
+            "f18": 3.043,
+            "f6": 9_910_027.175,
+            "f8": 0.86,
+        },
+        quote_time=datetime(2026, 6, 9, 6, 30, tzinfo=UTC),
+    )
+
+    assert quote is not None
+    assert quote.code == "161005"
+    assert quote.turnover_yuan == 9_910_027.175
+    assert quote.turnover_rate_pct == 0.86
 
 
 def test_sina_lof_quote_parses_hot_hong_kong_us_internet_quote():
@@ -645,7 +712,7 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "160004" not in sent_texts[0]
     assert "160005" not in sent_texts[0]
     assert "160008" not in sent_texts[0]
-    assert "成交额：800万；估算溢价：-4.50%" in sent_texts[0]
+    assert "成交额：800万；换手率：--；估算溢价：-4.50%" in sent_texts[0]
     assert "操作建议：折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。" in sent_texts[0]
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
     rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
@@ -900,7 +967,7 @@ def test_lof_notice_test_uses_alert_template(tmp_path):
                 "2026-06-03 10:04",
                 "501312 [QDII] 核心LOF501312",
                 "操作建议：当前折溢价未超过提醒阈值，建议仅观察。",
-                "成交额：10万；估算溢价：+0.00%",
+                "成交额：10万；换手率：--；估算溢价：+0.00%",
                 "官方净值溢价：+1.00%；申购限额1万",
             ]
         )

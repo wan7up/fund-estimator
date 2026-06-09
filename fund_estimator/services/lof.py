@@ -42,6 +42,7 @@ LOF_SCAN_TTL_SECONDS = 15
 LOF_DISCOVERY_TTL_SECONDS = 60
 PROXY_QUOTE_TTL_SECONDS = 10 * 60
 DEFAULT_MIN_TURNOVER_YUAN = 3_000_000
+DEFAULT_MIN_DOMESTIC_TURNOVER_RATE_PCT = 10.0
 DEFAULT_NORMAL_THRESHOLD_PCT = 2.0
 DEFAULT_STRONG_THRESHOLD_PCT = 5.0
 DISCOVERY_MAX_CODES = 500
@@ -115,7 +116,7 @@ class EastmoneyLofMarketDataSource:
         params = {
             "fltt": "2",
             "secids": ",".join(secids),
-            "fields": "f12,f14,f2,f3,f18,f6",
+            "fields": "f12,f14,f2,f3,f18,f6,f8",
             "_": str(int(time.time() * 1000)),
         }
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/"}
@@ -153,7 +154,7 @@ class EastmoneyLofMarketDataSource:
             "wbp2u": "|0|0|0|web",
             "fid": "f3",
             "fs": "b:MK0404,b:MK0405,b:MK0406,b:MK0407",
-            "fields": "f12,f13,f14,f2,f3,f18,f6",
+            "fields": "f12,f13,f14,f2,f3,f18,f6,f8",
             "_": str(int(time.time() * 1000)),
         }
         headers = {**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/center/gridlist.html#fund_lof"}
@@ -205,6 +206,7 @@ class EastmoneyLofMarketDataSource:
         change_pct = _parse_float(row.get("f3"))
         previous_close = _parse_float(row.get("f18"))
         turnover_yuan = _parse_float(row.get("f6"))
+        turnover_rate_pct = _parse_float(row.get("f8"))
         return LofMarketQuote(
             code=code,
             name=str(row.get("f14") or code),
@@ -212,6 +214,7 @@ class EastmoneyLofMarketDataSource:
             previous_close=previous_close,
             change_pct=change_pct,
             turnover_yuan=turnover_yuan,
+            turnover_rate_pct=turnover_rate_pct,
             quote_time=quote_time,
             market=market if market in {"SH", "SZ"} else "UNKNOWN",
             source="eastmoney_lof_list",
@@ -511,9 +514,9 @@ class LofMonitorService:
         refresh: bool = True,
     ) -> LofOpportunityResponse:
         min_turnover_key = self._cache_number(min_turnover_yuan)
-        cache_key = f"v6:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
+        cache_key = f"v7:{device_id}:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
         if not refresh:
-            fallback_key = f"v6:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
+            fallback_key = f"v7:default:{normal_threshold_pct}:{strong_threshold_pct}:{min_turnover_key}"
             cache_keys = [cache_key]
             if fallback_key != cache_key:
                 cache_keys.append(fallback_key)
@@ -645,6 +648,7 @@ class LofMonitorService:
             exchange_price=quote.latest_price,
             exchange_change_pct=quote.change_pct,
             exchange_turnover_yuan=quote.turnover_yuan,
+            exchange_turnover_rate_pct=quote.turnover_rate_pct,
             signal_basis="none",
             direction="unknown",
             level="none",
@@ -687,6 +691,7 @@ class LofMonitorService:
             exchange_price=quote.latest_price if quote else None,
             exchange_change_pct=quote.change_pct if quote else None,
             exchange_turnover_yuan=quote.turnover_yuan if quote else None,
+            exchange_turnover_rate_pct=quote.turnover_rate_pct if quote else None,
             direction="unknown",
             level="none",
             is_opportunity=False,
@@ -1060,13 +1065,25 @@ class LofMonitorService:
             level = "none"
             is_opportunity = False
         is_qdii = self._is_qdii_item(code=code, profile=profile, config=config)
-        needs_cross_day_confirmation = self._needs_cross_day_confirmation(
-            code=code,
-            signal_basis=signal_basis,
-            direction=direction,
-            is_qdii=is_qdii,
-            signal_history=signal_history or {},
-            now=now,
+        needs_cross_day_confirmation = bool(
+            is_opportunity
+            and self._needs_cross_day_confirmation(
+                code=code,
+                signal_basis=signal_basis,
+                direction=direction,
+                is_qdii=is_qdii,
+                signal_history=signal_history or {},
+                now=now,
+            )
+        )
+        needs_domestic_turnover_confirmation = bool(
+            is_opportunity
+            and self._needs_domestic_turnover_confirmation(
+                signal_basis=signal_basis,
+                direction=direction,
+                is_qdii=is_qdii,
+                turnover_rate_pct=quote.turnover_rate_pct if quote else None,
+            )
         )
         risks = self._risks(
             code=code,
@@ -1080,6 +1097,7 @@ class LofMonitorService:
             min_turnover_yuan=min_turnover_yuan,
             cooldown_keys=cooldown_keys,
             needs_cross_day_confirmation=needs_cross_day_confirmation,
+            needs_domestic_turnover_confirmation=needs_domestic_turnover_confirmation,
         )
         actionable = bool(
             is_opportunity
@@ -1088,6 +1106,7 @@ class LofMonitorService:
             and (quote.turnover_yuan or 0) >= min_turnover_yuan
             and "代理行情缺失" not in risks
             and not needs_cross_day_confirmation
+            and not needs_domestic_turnover_confirmation
             and not (direction == "premium" and status.purchase_status == "暂停")
             and "通知冷却中" not in risks
         )
@@ -1104,6 +1123,7 @@ class LofMonitorService:
             exchange_price=exchange_price,
             exchange_change_pct=quote.change_pct if quote else (haoetf_snapshot.exchange_change_pct if haoetf_snapshot else None),
             exchange_turnover_yuan=quote.turnover_yuan if quote else None,
+            exchange_turnover_rate_pct=quote.turnover_rate_pct if quote else None,
             reference_change_pct=_safe_round(reference_change),
             reference_period_start=reference_period_start,
             reference_period_end=reference_period_end,
@@ -1142,7 +1162,7 @@ class LofMonitorService:
         signal_history: dict[str, Any],
         now: datetime,
     ) -> bool:
-        if signal_basis != "official" or direction != "discount" or is_qdii:
+        if signal_basis != "official" or is_qdii:
             return False
         return not LofMonitorService._has_prior_same_direction_signal(
             code=code,
@@ -1176,6 +1196,18 @@ class LofMonitorService:
         return False
 
     @staticmethod
+    def _needs_domestic_turnover_confirmation(
+        *,
+        signal_basis: str,
+        direction: str,
+        is_qdii: bool,
+        turnover_rate_pct: float | None,
+    ) -> bool:
+        if signal_basis != "official" or is_qdii:
+            return False
+        return turnover_rate_pct is None or turnover_rate_pct < DEFAULT_MIN_DOMESTIC_TURNOVER_RATE_PCT
+
+    @staticmethod
     def _premium_pct(price: float | None, nav: float | None) -> float | None:
         if price is None or nav is None or nav <= 0:
             return None
@@ -1199,6 +1231,7 @@ class LofMonitorService:
         min_turnover_yuan: float,
         cooldown_keys: set[str],
         needs_cross_day_confirmation: bool = False,
+        needs_domestic_turnover_confirmation: bool = False,
     ) -> list[str]:
         risks: list[str] = []
         if exchange_price is None:
@@ -1217,8 +1250,18 @@ class LofMonitorService:
             risks.append(f"申购{status.purchase_status}")
         if status.redemption_status == "暂停":
             risks.append("赎回暂停")
+        if needs_domestic_turnover_confirmation:
+            if quote is None or quote.turnover_rate_pct is None:
+                risks.append("换手率未知")
+            else:
+                risks.append(f"换手率不足{DEFAULT_MIN_DOMESTIC_TURNOVER_RATE_PCT:.0f}%")
         if needs_cross_day_confirmation:
-            risks.append("非QDII官方折价候选，等待跨日确认")
+            if direction == "discount":
+                risks.append("非QDII官方折价候选，等待跨日确认")
+            elif direction == "premium":
+                risks.append("非QDII官方溢价候选，等待跨日确认")
+            else:
+                risks.append("非QDII官方信号，等待跨日确认")
         if status.warning:
             risks.append(status.warning)
         if level != "none" and self._cooldown_key(code, direction, level) in cooldown_keys:

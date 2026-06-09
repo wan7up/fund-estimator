@@ -34,6 +34,7 @@ class LofMarketQuote(BaseModel):
     previous_close: float | None = None
     change_pct: float | None = None
     turnover_yuan: float | None = None
+    turnover_rate_pct: float | None = None
     quote_time: datetime
     market: Literal["SH", "SZ", "UNKNOWN"] = "UNKNOWN"
     source: str = "unknown"
@@ -52,6 +53,7 @@ class LofPremiumItem(BaseModel):
     exchange_price: float | None = None
     exchange_change_pct: float | None = None
     exchange_turnover_yuan: float | None = None
+    exchange_turnover_rate_pct: float | None = None
     reference_change_pct: float | None = None
     reference_period_start: str | None = None
     reference_period_end: str | None = None

@@ -21,6 +21,7 @@ COOLDOWN_SECONDS = 30 * 60
 SUMMARY_INTERVAL_SECONDS = 10 * 60
 NOTICE_PREMIUM_THRESHOLD_PCT = 3.0
 DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
+DEFAULT_NOTICE_MIN_DOMESTIC_TURNOVER_RATE_PCT = 10.0
 SIGNAL_HISTORY_LOOKBACK_DAYS = 10
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
 AFTERNOON_CHECK_TIME = "14:30"
@@ -809,6 +810,7 @@ class LofNoticeService:
                 "direction": "premium" if premium > 0 else "discount",
                 "premium_pct": round(float(premium), 4),
                 "turnover_yuan": item.exchange_turnover_yuan,
+                "turnover_rate_pct": item.exchange_turnover_rate_pct,
                 "purchase_status": item.purchase_status,
                 "name": item.name,
             }
@@ -839,7 +841,20 @@ class LofNoticeService:
             return False
         if item.exchange_turnover_yuan is None or item.exchange_turnover_yuan <= min_turnover_yuan:
             return False
+        if LofNoticeService._needs_domestic_turnover_filter(item):
+            return False
         return True
+
+    @staticmethod
+    def _needs_domestic_turnover_filter(item: LofPremiumItem) -> bool:
+        return (
+            item.signal_basis == "official"
+            and not item.is_qdii
+            and (
+                item.exchange_turnover_rate_pct is None
+                or item.exchange_turnover_rate_pct < DEFAULT_NOTICE_MIN_DOMESTIC_TURNOVER_RATE_PCT
+            )
+        )
 
     @staticmethod
     def _notice_premium_pct(item: LofPremiumItem) -> float | None:
@@ -1002,7 +1017,7 @@ class LofNoticeService:
                 [
                     LofNoticeService._format_item_title(item),
                     f"操作建议：{LofNoticeService._action_advice(item, min_turnover_yuan=min_turnover_yuan)}",
-                    f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
+                    f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；换手率：{LofNoticeService._format_pct(item.exchange_turnover_rate_pct)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
                     f"官方净值溢价：{LofNoticeService._format_pct(item.official_premium_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
                 ]
             )
@@ -1022,7 +1037,7 @@ class LofNoticeService:
                 local_now.strftime('%Y-%m-%d %H:%M'),
                 "501312 [QDII] 华宝海外科技股票(QDII-LOF)A",
                 "操作建议：测试通知，当前未取得基金实时数据，仅用于验证飞书连接。",
-                "成交额：--；估算溢价：--",
+                "成交额：--；换手率：--；估算溢价：--",
                 "官方净值溢价：--；申购限额--",
             ]
         )
