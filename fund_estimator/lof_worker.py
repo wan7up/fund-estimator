@@ -33,36 +33,39 @@ async def daily_summary_command(args: argparse.Namespace) -> dict[str, Any]:
     now = datetime.now(UTC)
     due_daily = notice.should_run_daily_summary(now)
     due_afternoon = notice.should_run_afternoon_check(now)
-    if not args.force and not args.force_afternoon_check and not due_daily and not due_afternoon:
+    due_new_issue = notice.should_run_new_issue_reminder(now)
+    if not args.force and not args.force_afternoon_check and not args.force_new_issue and not due_daily and not due_afternoon and not due_new_issue:
         return {"notice": {"status": "skipped_notice_schedule"}}
     monitor = create_lof_monitor_service(estimator, notice_service=notice)
-    response = await monitor.get_opportunities(
-        normal_threshold_pct=args.normal_threshold_pct,
-        strong_threshold_pct=args.strong_threshold_pct,
-        min_turnover_yuan=args.min_turnover_yuan,
-        limit=args.limit,
-        refresh=True,
-    )
+    response = None
+    if args.force or args.force_afternoon_check or due_daily or due_afternoon:
+        response = await monitor.get_opportunities(
+            normal_threshold_pct=args.normal_threshold_pct,
+            strong_threshold_pct=args.strong_threshold_pct,
+            min_turnover_yuan=args.min_turnover_yuan,
+            limit=args.limit,
+            refresh=True,
+        )
     notice_result: dict[str, Any] = {"status": "skipped_daily_summary_schedule"}
     new_issue_notice: dict[str, Any] | None = None
     afternoon_notice: dict[str, Any] | None = None
-    if args.force or due_daily:
+    if (args.force or due_daily) and response is not None:
         notice_result = notice.notify_daily_summary(
             response,
             now=now,
             force=args.force,
             send_empty=not args.no_empty,
         )
-        if notice_result.get("status") == "sent" or args.force_new_issue:
-            new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
-    if args.force_afternoon_check or due_afternoon:
+    if args.force_new_issue or due_new_issue:
+        new_issue_notice = await notice.notify_new_issue_reminder(now=now, force=args.force_new_issue)
+    if (args.force_afternoon_check or due_afternoon) and response is not None:
         afternoon_notice = notice.notify_afternoon_check(
             response,
             now=now,
             force=args.force_afternoon_check,
         )
     return {
-        "scan": response.model_dump(mode="json"),
+        "scan": response.model_dump(mode="json") if response is not None else None,
         "notice": notice_result,
         "afternoon_notice": afternoon_notice,
         "new_issue_notice": new_issue_notice,

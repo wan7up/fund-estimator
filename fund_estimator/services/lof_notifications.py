@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ SIGNAL_HISTORY_LOOKBACK_DAYS = 10
 DEFAULT_DAILY_SUMMARY_TIME = "10:00"
 AFTERNOON_CHECK_TIME = "14:30"
 AFTERNOON_CHECK_WINDOW_SECONDS = 20 * 60
+IPO_REMINDER_RETRY_SECONDS = 30 * 60
 CONNECT_STATE_TTL_SECONDS = 10 * 60
 FEISHU_ACCOUNTS_BASE = "https://accounts.feishu.cn"
 LARK_ACCOUNTS_BASE = "https://accounts.larksuite.com"
@@ -145,7 +147,15 @@ class EastmoneyNewIssueSource:
     async def get_calendar(self, target_date: date) -> NewIssueCalendar:
         headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://datapc.eastmoney.com/da/purchase/index?color=b"}
         async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
-            stocks, bonds = await self._fetch_stocks(client, target_date), await self._fetch_bonds(client, target_date)
+            stock_result, bond_result = await asyncio.gather(
+                self._fetch_stocks(client, target_date),
+                self._fetch_bonds(client, target_date),
+                return_exceptions=True,
+            )
+        stocks = [] if isinstance(stock_result, Exception) else stock_result
+        bonds = [] if isinstance(bond_result, Exception) else bond_result
+        if isinstance(stock_result, Exception) and isinstance(bond_result, Exception):
+            raise stock_result
         return NewIssueCalendar(target_date=target_date, stocks=stocks, bonds=bonds)
 
     async def _fetch_stocks(self, client: httpx.AsyncClient, target_date: date) -> list[NewIssueItem]:
@@ -511,6 +521,24 @@ class LofNoticeService:
             return False
         return self._is_in_afternoon_check_window(local)
 
+    def should_run_new_issue_reminder(self, now: datetime | None = None) -> bool:
+        now = now or datetime.now(UTC)
+        state = read_json(self.config.state_path, {})
+        if not self.effective_enabled(state) or not self.effective_ipo_reminder_enabled(state):
+            return False
+        local = now.astimezone(MARKET_TZ)
+        if local.weekday() >= 5:
+            return False
+        today = local.date().isoformat()
+        if state.get("last_ipo_reminder_date") == today:
+            return False
+        if local.time() < self._parse_hhmm(self.effective_daily_summary_time(state)):
+            return False
+        last_check = self._parse_time(state.get("last_ipo_check_at"))
+        if last_check is not None and (now - last_check).total_seconds() < IPO_REMINDER_RETRY_SECONDS:
+            return False
+        return True
+
     def _settings_from_state(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = state if state is not None else read_json(self.config.state_path, {})
         settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
@@ -700,6 +728,7 @@ class LofNoticeService:
             result = self._state_result("skipped_duplicate_ipo_reminder", now=now, last_error=None, rows=[])
             self._write_state(state, result, now=now)
             return result
+        state["last_ipo_check_at"] = now.isoformat(timespec="seconds")
         try:
             calendar = await self.new_issue_source.get_calendar(local.date())
         except httpx.HTTPError as exc:

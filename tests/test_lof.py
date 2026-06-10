@@ -11,7 +11,7 @@ from fund_estimator.services.exceptions import AppError, DataSourceError
 from fund_estimator.services.lof import EastmoneyLofMarketDataSource, EastmoneyLofTradingStatusDataSource, LofMonitorService
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
 from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
-from fund_estimator.services.lof_notifications import LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
+from fund_estimator.services.lof_notifications import EastmoneyNewIssueSource, LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
 
 
 class DummyEstimator:
@@ -116,6 +116,14 @@ class DummyNewIssueSource:
     async def get_calendar(self, target_date: date) -> NewIssueCalendar:
         self.calls.append(target_date)
         return self.calendar
+
+
+class PartialFailingEastmoneyNewIssueSource(EastmoneyNewIssueSource):
+    async def _fetch_stocks(self, client, target_date: date) -> list[NewIssueItem]:
+        raise httpx.ReadTimeout("stock timeout")
+
+    async def _fetch_bonds(self, client, target_date: date) -> list[NewIssueItem]:
+        return [NewIssueItem(kind="bond", code="113704", name="春风转债", apply_code="754129")]
 
 
 class DummyNoticeMonitor:
@@ -807,6 +815,62 @@ def test_lof_notice_scheduler_sends_new_issue_after_daily_summary(tmp_path):
     assert monitor.calls and monitor.calls[0]["refresh"] is True
 
 
+def test_lof_notice_scheduler_retries_new_issue_after_empty_check(tmp_path):
+    first_now = datetime(2026, 6, 3, 2, 0, tzinfo=UTC)
+    response = LofOpportunityResponse(
+        scanned_at=first_now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=[],
+    )
+    monitor = DummyNoticeMonitor(response)
+    empty_source = DummyNewIssueSource(NewIssueCalendar(target_date=date(2026, 6, 3), stocks=[], bonds=[]))
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        ipo_reminder_enabled=True,
+    )
+    notice = LofNoticeService(config, new_issue_source=empty_source)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice)
+
+    first = __import__("asyncio").run(scheduler.run_once(now=first_now))
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+
+    assert first["notice"]["status"] == "sent"
+    assert first["new_issue_notice"]["status"] == "no_new_issue_items"
+    assert state["last_daily_summary_date"] == "2026-06-03"
+    assert state["last_ipo_check_at"] == "2026-06-03T02:00:00+00:00"
+    assert state.get("last_ipo_reminder_date") is None
+    assert scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 5, tzinfo=UTC)) == 25 * 60
+
+    bond_source = DummyNewIssueSource(
+        NewIssueCalendar(
+            target_date=date(2026, 6, 3),
+            stocks=[],
+            bonds=[NewIssueItem(kind="bond", code="113704", name="春风转债", apply_code="754129")],
+        )
+    )
+    notice_retry = LofNoticeService(config, new_issue_source=bond_source)
+    notice_retry._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    retry_scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice_retry)
+
+    second = __import__("asyncio").run(retry_scheduler.run_once(now=datetime(2026, 6, 3, 2, 30, tzinfo=UTC)))
+
+    assert second["scan"] is None
+    assert second["new_issue_notice"]["status"] == "sent"
+    assert bond_source.calls == [date(2026, 6, 3)]
+    assert len(monitor.calls) == 1
+    assert sent_texts[-1].startswith("【打新提醒】")
+
+
 def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
     calendar = NewIssueCalendar(
         target_date=date(2026, 6, 3),
@@ -871,6 +935,15 @@ def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
     ]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_ipo_reminder_date"] == "2026-06-03"
+
+
+def test_new_issue_calendar_keeps_bonds_when_stock_endpoint_times_out():
+    source = PartialFailingEastmoneyNewIssueSource()
+
+    calendar = __import__("asyncio").run(source.get_calendar(date(2026, 6, 10)))
+
+    assert calendar.stocks == []
+    assert [bond.code for bond in calendar.bonds] == ["113704"]
 
 
 def test_new_issue_reminder_omits_empty_stock_section_and_footer(tmp_path):
