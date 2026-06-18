@@ -450,6 +450,24 @@ def test_eastmoney_trading_status_prefers_transaction_row_over_nav_link():
     assert status.daily_purchase_limit_yuan == 10_000
 
 
+def test_eastmoney_lof_limit_parser_ignores_unlimited_with_minimum_purchase():
+    text = "申购起点10.00元定投起点10.00元日累计申购限额无限额首次购买10.00元追加购买10.00元"
+
+    assert EastmoneyLofTradingStatusDataSource._extract_limit_yuan(text) is None
+
+
+def test_eastmoney_lof_limit_parser_keeps_real_daily_limit():
+    text = "交易状态开放申购开放赎回申购与赎回金额申购起点10.00元单日累计购买上限1000元首次购买10.00元"
+
+    assert EastmoneyLofTradingStatusDataSource._extract_limit_yuan(text) == 1000
+
+
+def test_eastmoney_lof_limit_parser_keeps_reverse_daily_limit():
+    text = "交易状态开放申购开放赎回每个账户1000元单日申购限额"
+
+    assert EastmoneyLofTradingStatusDataSource._extract_limit_yuan(text) == 1000
+
+
 def test_lof_scan_keeps_core_rows_when_profile_fails(tmp_path):
     estimator = PartlyFailingEstimator()
     estimator.cache = SQLiteCache(tmp_path / "lof.sqlite3")

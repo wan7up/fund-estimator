@@ -311,16 +311,21 @@ class EastmoneyLofTradingStatusDataSource:
     @staticmethod
     def _extract_limit_yuan(text: str) -> float | None:
         limit_keys = r"(?:日累计(?:申购限额|购买上限)|单日累计(?:申购限额|购买上限)|单日(?:申购限额|购买上限)|每日(?:申购限额|购买上限)|申购上限|购买上限|限购)"
-        patterns = (
-            rf"{limit_keys}[^0-9]{{0,20}}(\d+(?:\.\d+)?)(万|元)",
-            rf"(\d+(?:\.\d+)?)(万|元)[^，。；;]{{0,20}}{limit_keys}",
-        )
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if not match:
-                continue
-            value = float(match.group(1))
-            unit = match.group(2)
+        if re.search(rf"{limit_keys}[^0-9]{{0,20}}(?:无限额|不限|不限制)", text):
+            return None
+        min_purchase_terms = r"(?:最低|起购|起点|申购起点|购买起点|定投起点|首次申购|追加申购|首次购买|追加购买|最小)"
+        forward_match = re.search(rf"{limit_keys}[^0-9]{{0,20}}(\d+(?:\.\d+)?)(万|元)", text)
+        if forward_match:
+            value = float(forward_match.group(1))
+            unit = forward_match.group(2)
+            return value * 10_000 if unit == "万" else value
+        reverse_match = re.search(rf"(\d+(?:\.\d+)?)(万|元)[^，。；;]{{0,20}}{limit_keys}", text)
+        if reverse_match:
+            context = text[max(0, reverse_match.start() - 20) : reverse_match.end() + 20]
+            if re.search(min_purchase_terms, context):
+                return None
+            value = float(reverse_match.group(1))
+            unit = reverse_match.group(2)
             return value * 10_000 if unit == "万" else value
         return None
 
