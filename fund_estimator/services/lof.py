@@ -275,7 +275,7 @@ class EastmoneyLofTradingStatusDataSource:
         redemption = None
         if "暂停申购" in window:
             purchase = "暂停"
-        elif "限制大额申购" in window or "限大额申购" in window:
+        elif "限制大额申购" in window or "限大额申购" in window or "限大额" in window:
             purchase = "限制大额"
         elif "开放申购" in window or "可申购" in window:
             purchase = "开放"

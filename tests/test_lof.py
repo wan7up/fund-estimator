@@ -450,6 +450,20 @@ def test_eastmoney_trading_status_prefers_transaction_row_over_nav_link():
     assert status.daily_purchase_limit_yuan == 10_000
 
 
+def test_eastmoney_trading_status_parses_short_large_purchase_limit():
+    html = """
+    <p>交易状态：限大额（单日累计购买上限100元）开放赎回</p>
+    <p>申购起点10.00元日累计申购限额100.00元首次购买10.00元</p>
+    """
+    profile = __import__("asyncio").run(DummyEstimator().get_profile("160644"))
+
+    status = EastmoneyLofTradingStatusDataSource()._parse_status(html, profile)
+
+    assert status.purchase_status == "限制大额"
+    assert status.redemption_status == "开放"
+    assert status.daily_purchase_limit_yuan == 100
+
+
 def test_eastmoney_lof_limit_parser_ignores_unlimited_with_minimum_purchase():
     text = "申购起点10.00元定投起点10.00元日累计申购限额无限额首次购买10.00元追加购买10.00元"
 
