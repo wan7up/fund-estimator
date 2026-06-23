@@ -8,7 +8,13 @@ from fund_estimator.models.lof import LofMarketQuote, LofOpportunityResponse, Lo
 from fund_estimator.models.schema import FundProfile, FundSearchResult
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.exceptions import AppError, DataSourceError
-from fund_estimator.services.lof import EastmoneyLofMarketDataSource, EastmoneyLofTradingStatusDataSource, LofMonitorService
+from fund_estimator.services.lof import (
+    EastmoneyLofLatestNavDataSource,
+    EastmoneyLofMarketDataSource,
+    EastmoneyLofTradingStatusDataSource,
+    LatestFundNav,
+    LofMonitorService,
+)
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
 from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
 from fund_estimator.services.lof_notifications import EastmoneyNewIssueSource, LofNoticeConfig, LofNoticeService, NewIssueCalendar, NewIssueItem
@@ -84,6 +90,11 @@ class FailingMarketSource:
         raise DataSourceError("LOF_QUOTE_FETCH_FAILED", "LOF 场内实时行情获取失败")
 
 
+class EmptyDiscoveryMarketSource(DummyMarketSource):
+    async def get_all_quotes(self):
+        return {}
+
+
 class DummyStatusSource:
     async def get_status(self, code: str, profile: FundProfile):
         return LofTradingStatus(
@@ -106,6 +117,16 @@ class DummyProxySource:
 class DummyHaoEtfSource:
     async def get_snapshots(self, codes: list[str]):
         return {}
+
+
+class DummyLatestNavSource:
+    def __init__(self, rows: dict[str, LatestFundNav] | None = None) -> None:
+        self.rows = rows or {}
+        self.calls: list[str] = []
+
+    async def get_latest_nav(self, code: str):
+        self.calls.append(code)
+        return self.rows.get(code)
 
 
 class DummyNewIssueSource:
@@ -144,6 +165,7 @@ def make_service(tmp_path) -> LofMonitorService:
         cache=estimator.cache,
         market_source=DummyMarketSource(),
         status_source=DummyStatusSource(),
+        latest_nav_source=DummyLatestNavSource(),
         proxy_source=DummyProxySource(),
         haoetf_source=DummyHaoEtfSource(),
     )
@@ -153,6 +175,77 @@ def seed_signal_history(config: LofNoticeConfig, items: list[LofPremiumItem], no
     state = json.loads(config.state_path.read_text(encoding="utf-8")) if config.state_path.exists() else {}
     LofNoticeService(config)._record_signal_history(state, items, now=now)
     config.state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
+def test_eastmoney_latest_nav_parser_uses_first_history_row():
+    text = """var apidata={ content:"<table><tbody>
+    <tr><td>2026-06-22</td><td class='tor bold'>2.1546</td><td>2.1546</td></tr>
+    <tr><td>2026-06-18</td><td class='tor bold'>2.0816</td><td>2.0816</td></tr>
+    </tbody></table>"};"""
+
+    latest_nav = EastmoneyLofLatestNavDataSource._parse_latest_nav(text)
+
+    assert latest_nav == LatestFundNav(nav_date=date(2026, 6, 22), nav=2.1546)
+
+
+def test_eastmoney_lof_quote_uses_previous_close_when_latest_missing_preopen():
+    quote = EastmoneyLofMarketDataSource._quote_from_row(
+        {
+            "f12": "501096",
+            "f13": "1",
+            "f14": "国联安科创LOF",
+            "f2": "-",
+            "f3": "-",
+            "f18": "2.386",
+            "f6": "-",
+            "f8": "0.0",
+        },
+        quote_time=datetime(2026, 6, 23, 0, 58, tzinfo=UTC),
+    )
+
+    assert quote is not None
+    assert quote.latest_price == 2.386
+    assert quote.previous_close == 2.386
+    assert quote.change_pct is None
+
+
+def test_lof_scan_deep_profiles_full_discovery_when_preopen_turnover_missing():
+    quotes = {
+        str(index): LofMarketQuote(
+            code=f"16{index:04d}"[:6],
+            name="测试LOF",
+            latest_price=1.0,
+            previous_close=1.0,
+            change_pct=None,
+            turnover_yuan=None,
+            quote_time=datetime(2026, 6, 23, 0, 58, tzinfo=UTC),
+            market="SZ",
+            source="mock",
+        )
+        for index in range(120)
+    }
+
+    assert LofMonitorService._deep_profile_limit(quotes) == 120
+
+
+def test_lof_item_refreshes_stale_profile_nav_from_latest_nav_source(tmp_path):
+    estimator = DummyEstimator()
+    estimator.cache = SQLiteCache(tmp_path / "lof.sqlite3")
+    service = LofMonitorService(
+        estimator=estimator,
+        cache=estimator.cache,
+        market_source=DummyMarketSource(),
+        status_source=DummyStatusSource(),
+        latest_nav_source=DummyLatestNavSource({"161128": LatestFundNav(date(2026, 6, 22), 1.02)}),
+        proxy_source=DummyProxySource(),
+        haoetf_source=DummyHaoEtfSource(),
+    )
+
+    item = __import__("asyncio").run(service.get_item("161128"))
+
+    assert item.official_nav_date == "2026-06-22"
+    assert item.official_nav == 1.02
+    assert item.official_premium_pct == 2.9412
 
 
 def test_lof_opportunity_uses_proxy_estimate_and_flags_risks(tmp_path):
@@ -352,6 +445,35 @@ def test_lof_scan_discovers_non_core_premium_from_full_market_quotes(tmp_path):
     assert item.actionable is False
 
 
+def test_lof_scan_uses_expired_discovery_quotes_when_market_preopen_empty(tmp_path):
+    service = make_service(tmp_path)
+    stale_quote = LofMarketQuote(
+        code="160999",
+        name="新机会LOF",
+        latest_price=1.08,
+        previous_close=1.0,
+        change_pct=5.0,
+        turnover_yuan=6_000_000,
+        quote_time=datetime(2026, 5, 30, 6, 0, tzinfo=UTC),
+        market="SZ",
+        source="mock",
+    )
+    service.cache.set(
+        "lof_discovery_quotes",
+        "all",
+        {"quotes": [stale_quote.model_dump(mode="json")]},
+        -1,
+    )
+    service.discovery_market_source = EmptyDiscoveryMarketSource()
+
+    response = __import__("asyncio").run(service.get_opportunities(limit=200))
+    item = next(row for row in response.items if row.code == "160999")
+
+    assert item.name == "核心LOF160999"
+    assert item.exchange_price == 1.08
+    assert "全市场 LOF 行情为空，已使用过期发现池缓存" in response.errors
+
+
 def test_lof_scan_refresh_false_falls_back_to_live_scan_on_cache_miss(tmp_path):
     service = make_service(tmp_path)
 
@@ -490,6 +612,7 @@ def test_lof_scan_keeps_core_rows_when_profile_fails(tmp_path):
         cache=estimator.cache,
         market_source=DummyMarketSource(),
         status_source=DummyStatusSource(),
+        latest_nav_source=DummyLatestNavSource(),
         proxy_source=DummyProxySource(),
         haoetf_source=DummyHaoEtfSource(),
     )

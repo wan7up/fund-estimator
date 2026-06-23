@@ -256,13 +256,13 @@ def test_compare_ai_login_config_models_and_commentary(tmp_path, monkeypatch):
 def test_lof_monitor_refresh_and_cache_fallback(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
-    refresh_response = client.get("/api/lof/opportunities?refresh=true&limit=20")
+    refresh_response = client.get("/api/lof/opportunities?refresh=true&limit=80")
     assert refresh_response.status_code == 200
     refresh_body = refresh_response.json()
     assert {item["code"] for item in refresh_body["items"]} >= {"161128", "501018", "164906", "160644", "160717"}
     assert any(item["is_opportunity"] for item in refresh_body["items"])
 
-    cached_response = client.get("/api/lof/opportunities?limit=20", headers={"X-Device-Id": "phone-a"})
+    cached_response = client.get("/api/lof/opportunities?limit=80", headers={"X-Device-Id": "phone-a"})
     assert cached_response.status_code == 200
     assert {item["code"] for item in cached_response.json()["items"]} >= {"161128", "501018"}
 

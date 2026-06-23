@@ -40,6 +40,7 @@ LOF_QUOTE_TTL_SECONDS = 15
 LOF_STATUS_TTL_SECONDS = 10 * 60
 LOF_SCAN_TTL_SECONDS = 15
 LOF_DISCOVERY_TTL_SECONDS = 60
+LOF_LATEST_NAV_TTL_SECONDS = 30 * 60
 PROXY_QUOTE_TTL_SECONDS = 10 * 60
 DEFAULT_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_MIN_DOMESTIC_TURNOVER_RATE_PCT = 10.0
@@ -47,6 +48,7 @@ DEFAULT_NORMAL_THRESHOLD_PCT = 2.0
 DEFAULT_STRONG_THRESHOLD_PCT = 5.0
 DISCOVERY_MAX_CODES = 500
 DISCOVERY_DEEP_PROFILE_MAX_CODES = 80
+DISCOVERY_PREOPEN_DEEP_PROFILE_MAX_CODES = 120
 TRADING_PAUSED = "\u6682\u505c"
 MARKET_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -62,6 +64,12 @@ class HaoEtfSnapshot:
     proxy_symbol: str | None
     proxy_change_pct: float | None
     source: str = "haoetf"
+
+
+@dataclass(frozen=True)
+class LatestFundNav:
+    nav_date: date
+    nav: float
 
 
 def _parse_float(value: Any) -> float | None:
@@ -205,6 +213,8 @@ class EastmoneyLofMarketDataSource:
         latest = _parse_float(row.get("f2"))
         change_pct = _parse_float(row.get("f3"))
         previous_close = _parse_float(row.get("f18"))
+        if latest is None and previous_close is not None:
+            latest = previous_close
         turnover_yuan = _parse_float(row.get("f6"))
         turnover_rate_pct = _parse_float(row.get("f8"))
         return LofMarketQuote(
@@ -328,6 +338,41 @@ class EastmoneyLofTradingStatusDataSource:
             unit = reverse_match.group(2)
             return value * 10_000 if unit == "万" else value
         return None
+
+
+class EastmoneyLofLatestNavDataSource:
+    def __init__(self, timeout: float = 6.0) -> None:
+        self.timeout = timeout
+
+    async def get_latest_nav(self, code: str) -> LatestFundNav | None:
+        url = "https://fundf10.eastmoney.com/F10DataApi.aspx"
+        params = {
+            "type": "lsjz",
+            "code": code,
+            "page": "1",
+            "per": "1",
+            "sdate": "",
+            "edate": "",
+            "rt": "0",
+        }
+        headers = {**DEFAULT_HEADERS, "Referer": f"https://fundf10.eastmoney.com/jjjz_{code}.html"}
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+        return self._parse_latest_nav(response.text)
+
+    @staticmethod
+    def _parse_latest_nav(text: str) -> LatestFundNav | None:
+        match = re.search(
+            r"<tr>\s*<td>(\d{4}-\d{2}-\d{2})</td>\s*<td[^>]*>(\d+(?:\.\d+)?)</td>",
+            text,
+        )
+        if not match:
+            return None
+        try:
+            return LatestFundNav(nav_date=date.fromisoformat(match.group(1)), nav=float(match.group(2)))
+        except ValueError:
+            return None
 
 
 class YahooProxyDataSource:
@@ -458,6 +503,7 @@ class LofMonitorService:
         cache: SQLiteCache,
         market_source: Any | None = None,
         status_source: Any | None = None,
+        latest_nav_source: Any | None = None,
         proxy_source: Any | None = None,
         haoetf_source: Any | None = None,
         discovery_market_source: Any | None = None,
@@ -468,6 +514,7 @@ class LofMonitorService:
         self.cache = cache
         self.market_source = market_source or EastmoneyLofMarketDataSource()
         self.status_source = status_source or EastmoneyLofTradingStatusDataSource()
+        self.latest_nav_source = latest_nav_source or EastmoneyLofLatestNavDataSource()
         self.proxy_source = proxy_source or YahooProxyDataSource()
         self.haoetf_source = haoetf_source or HaoEtfDataSource()
         self.discovery_market_source = discovery_market_source or (
@@ -547,7 +594,8 @@ class LofMonitorService:
             errors=errors,
         )
         codes = list(dict.fromkeys(base_codes + discovered_codes))
-        deep_codes = list(dict.fromkeys(base_codes + discovered_codes[:DISCOVERY_DEEP_PROFILE_MAX_CODES]))
+        deep_profile_limit = self._deep_profile_limit(discovery_quote_map)
+        deep_codes = list(dict.fromkeys(base_codes + discovered_codes[:deep_profile_limit]))
         quote_map = await self._get_market_quotes(codes, errors, preloaded=discovery_quote_map)
         profile_results = await asyncio.gather(*(self._get_profile(code) for code in deep_codes), return_exceptions=True)
         profile_result_map = dict(zip(deep_codes, profile_results, strict=False))
@@ -719,7 +767,7 @@ class LofMonitorService:
         )
 
     async def get_item(self, code: str, *, device_id: str = "default") -> LofPremiumItem:
-        profile = await self.estimator.get_profile(code)
+        profile = await self._get_profile(code)
         quote_map = await self._get_market_quotes([code], [])
         haoetf_map = await self._get_haoetf_snapshots([code], [])
         proxy_map = await self._get_proxy_changes([code], [], profiles={code: profile})
@@ -741,7 +789,43 @@ class LofMonitorService:
         )
 
     async def _get_profile(self, code: str) -> FundProfile:
-        return await self.estimator.get_profile(code)
+        profile = await self.estimator.get_profile(code)
+        latest_nav = await self._get_latest_nav(code)
+        if latest_nav is None or latest_nav.nav_date <= profile.nav_date:
+            return profile
+        previous_nav = profile.last_nav
+        actual_change_pct = None
+        if previous_nav:
+            actual_change_pct = (latest_nav.nav / previous_nav - 1) * 100
+        return profile.model_copy(
+            update={
+                "nav_date": latest_nav.nav_date,
+                "last_nav": latest_nav.nav,
+                "previous_nav_date": profile.nav_date,
+                "previous_nav": previous_nav,
+                "actual_change_pct": actual_change_pct,
+            }
+        )
+
+    async def _get_latest_nav(self, code: str) -> LatestFundNav | None:
+        cached = self.cache.get("lof_latest_nav", code)
+        if cached:
+            try:
+                return LatestFundNav(nav_date=date.fromisoformat(str(cached["nav_date"])), nav=float(cached["nav"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        try:
+            latest_nav = await self.latest_nav_source.get_latest_nav(code)
+        except Exception:
+            return None
+        if latest_nav is not None:
+            self.cache.set(
+                "lof_latest_nav",
+                code,
+                {"nav_date": latest_nav.nav_date.isoformat(), "nav": latest_nav.nav},
+                LOF_LATEST_NAV_TTL_SECONDS,
+            )
+        return latest_nav
 
     async def _get_status(self, code: str, profile: FundProfile | None) -> LofTradingStatus:
         if profile is None:
@@ -756,14 +840,16 @@ class LofMonitorService:
     async def _get_discovery_quotes(self, errors: list[str]) -> dict[str, LofMarketQuote]:
         cached = self.cache.get("lof_discovery_quotes", "all")
         if cached:
-            rows = cached.get("quotes") or []
-            return {
-                quote.code: quote
-                for quote in (LofMarketQuote.model_validate(row) for row in rows)
-                if quote.latest_price is not None
-            }
+            return self._parse_discovery_quote_cache(cached)
+        stale_cached = self.cache.get("lof_discovery_quotes", "all", include_expired=True)
+        stale_quotes = self._parse_discovery_quote_cache(stale_cached) if stale_cached else {}
         if not hasattr(self.discovery_market_source, "get_all_quotes"):
-            return await self._get_search_based_discovery_quotes(errors)
+            fetched = await self._get_search_based_discovery_quotes(errors)
+            if fetched:
+                return fetched
+            if stale_quotes:
+                errors.append("全市场 LOF 行情为空，已使用过期发现池缓存")
+            return stale_quotes
         primary_error = None
         try:
             fetched = await self.discovery_market_source.get_all_quotes()
@@ -772,6 +858,9 @@ class LofMonitorService:
             fetched = {}
         if not fetched:
             fetched = await self._get_search_based_discovery_quotes(errors)
+        if not fetched and stale_quotes:
+            errors.append("全市场 LOF 行情为空，已使用过期发现池缓存")
+            return stale_quotes
         if not fetched and primary_error:
             errors.append(primary_error)
         if fetched:
@@ -782,6 +871,29 @@ class LofMonitorService:
                 LOF_DISCOVERY_TTL_SECONDS,
             )
         return fetched
+
+    @staticmethod
+    def _deep_profile_limit(quote_map: dict[str, LofMarketQuote]) -> int:
+        if not quote_map:
+            return DISCOVERY_DEEP_PROFILE_MAX_CODES
+        priced_quotes = [quote for quote in quote_map.values() if quote.latest_price is not None]
+        if not priced_quotes:
+            return DISCOVERY_DEEP_PROFILE_MAX_CODES
+        if len(priced_quotes) <= DISCOVERY_PREOPEN_DEEP_PROFILE_MAX_CODES:
+            return DISCOVERY_PREOPEN_DEEP_PROFILE_MAX_CODES
+        turnover_count = sum(1 for quote in priced_quotes if quote.turnover_yuan is not None)
+        if turnover_count / len(priced_quotes) < 0.25:
+            return DISCOVERY_PREOPEN_DEEP_PROFILE_MAX_CODES
+        return DISCOVERY_DEEP_PROFILE_MAX_CODES
+
+    @staticmethod
+    def _parse_discovery_quote_cache(payload: dict[str, Any]) -> dict[str, LofMarketQuote]:
+        rows = payload.get("quotes") or []
+        return {
+            quote.code: quote
+            for quote in (LofMarketQuote.model_validate(row) for row in rows)
+            if quote.latest_price is not None
+        }
 
     async def _get_search_based_discovery_quotes(self, errors: list[str]) -> dict[str, LofMarketQuote]:
         if not hasattr(self.estimator, "list_funds"):
