@@ -134,11 +134,21 @@ class HoldingEstimate(BaseModel):
 
 
 class EstimateModeResult(BaseModel):
-    mode: Literal["raw", "normalized"]
+    mode: Literal["raw", "normalized", "enhanced"]
     estimated_nav: float
     estimated_change_pct: float
     portfolio_return_pct: float
     method: str
+
+
+class ThemeProxyEstimate(BaseModel):
+    theme: str
+    proxy_code: str
+    proxy_name: str
+    change_pct: float
+    weight_pct: float
+    contribution_pct: float
+    source: str = "unknown"
 
 
 class EstimateResponse(BaseModel):
@@ -159,7 +169,7 @@ class EstimateResponse(BaseModel):
     holdings_date: date | None = None
     top10_weight_sum: float
     usable_weight_sum: float
-    primary_mode: Literal["raw", "normalized"] = "raw"
+    primary_mode: Literal["raw", "normalized", "enhanced"] = "raw"
     estimated_nav: float
     estimated_nav_date: date | None = None
     estimated_change_pct: float | None
@@ -167,6 +177,8 @@ class EstimateResponse(BaseModel):
     actual_change_date: date | None = None
     raw: EstimateModeResult | None = None
     normalized: EstimateModeResult | None = None
+    enhanced: EstimateModeResult | None = None
+    theme_proxy: ThemeProxyEstimate | None = None
     confidence: ConfidenceLevel
     notes: list[str]
     warnings: list[str] = Field(default_factory=list)
@@ -176,7 +188,7 @@ class EstimateResponse(BaseModel):
 
 class BatchEstimateRequest(BaseModel):
     codes: list[str] = Field(..., min_length=1, max_length=100)
-    mode: Literal["raw", "normalized", "both"] = "both"
+    mode: Literal["raw", "normalized", "enhanced", "both"] = "both"
 
 
 class BatchEstimateItem(BaseModel):

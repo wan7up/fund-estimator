@@ -304,7 +304,7 @@ def create_app() -> FastAPI:
     @app.get("/api/estimate", response_model=EstimateResponse)
     async def estimate(
         code: str = Query(..., min_length=6, max_length=6),
-        mode: Literal["raw", "normalized", "both"] = "both",
+        mode: Literal["raw", "normalized", "enhanced", "both"] = "both",
     ) -> EstimateResponse:
         return await estimator.estimate(code, mode=mode)
 

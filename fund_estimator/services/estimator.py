@@ -15,10 +15,12 @@ from fund_estimator.models.schema import (
     FundProfile,
     HoldingEstimate,
     StockQuote,
+    ThemeProxyEstimate,
 )
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.confidence import assess_confidence
 from fund_estimator.services.exceptions import AppError, DataSourceError
+from fund_estimator.services.theme_proxy import infer_theme_proxy
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
@@ -110,7 +112,7 @@ class FundEstimatorService:
         self,
         code: str,
         *,
-        mode: Literal["raw", "normalized", "both"] = "both",
+        mode: Literal["raw", "normalized", "enhanced", "both"] = "both",
     ) -> EstimateResponse:
         self._validate_fund_code(code)
         profile = await self.get_profile(code)
@@ -141,7 +143,7 @@ class FundEstimatorService:
         code: str,
         profile: FundProfile,
         *,
-        mode: Literal["raw", "normalized", "both"],
+        mode: Literal["raw", "normalized", "enhanced", "both"],
         official_nav_available: bool,
     ) -> EstimateResponse:
         estimate_date = self._current_estimate_date()
@@ -254,6 +256,17 @@ class FundEstimatorService:
         if usable_weight_sum > 0:
             normalized_return = raw_return / (usable_weight_sum / 100)
             normalized_result = self._build_mode_result("normalized", estimate_base_nav, normalized_return)
+        enhanced_result: EstimateModeResult | None = None
+        theme_proxy: ThemeProxyEstimate | None = None
+        enhanced = await self._build_enhanced_result(
+            profile=profile,
+            holdings=holdings,
+            estimate_base_nav=estimate_base_nav,
+            raw_return=raw_return,
+            usable_weight_sum=usable_weight_sum,
+        )
+        if enhanced is not None:
+            enhanced_result, theme_proxy = enhanced
 
         confidence, notes = assess_confidence(
             fund_type=profile.fund_type,
@@ -267,6 +280,11 @@ class FundEstimatorService:
 
         if profile.source == "mock" or holdings.source == "mock" or any(q.source == "mock" for q in quotes.values()):
             notes.append("当前结果包含内置演示数据，真实投资研究应以实时数据源返回为准")
+        if theme_proxy is not None:
+            notes.append(
+                f"增强估值使用关联板块“{theme_proxy.theme}”（{theme_proxy.proxy_name}）"
+                f"代理未披露股票仓位约 {theme_proxy.weight_pct:.2f}%"
+            )
 
         if official_nav_available:
             base_date = profile.previous_nav_date.isoformat() if profile.previous_nav_date else "上一期"
@@ -279,6 +297,7 @@ class FundEstimatorService:
             mode=mode,
             raw_result=raw_result,
             normalized_result=normalized_result,
+            enhanced_result=enhanced_result,
             top10_weight_sum=holdings.top10_weight_sum,
             usable_weight_sum=usable_weight_sum,
         )
@@ -308,6 +327,8 @@ class FundEstimatorService:
             actual_change_date=profile.nav_date,
             raw=raw_result if mode in {"raw", "both"} else None,
             normalized=normalized_result if mode in {"normalized", "both"} else None,
+            enhanced=enhanced_result if mode in {"enhanced", "both"} else None,
+            theme_proxy=theme_proxy,
             confidence=confidence,
             notes=notes,
             warnings=warnings,
@@ -320,7 +341,7 @@ class FundEstimatorService:
         code: str,
         profile: FundProfile,
         *,
-        mode: Literal["raw", "normalized", "both"],
+        mode: Literal["raw", "normalized", "enhanced", "both"],
         official_nav_available: bool,
         estimate_base_nav: float,
     ) -> EstimateResponse:
@@ -342,7 +363,13 @@ class FundEstimatorService:
             return_ratio,
             method="proxy_exchange_traded_fund_return",
         )
-        selected = normalized_result if mode in {"normalized", "both"} else raw_result
+        enhanced_result = self._build_mode_result(
+            "enhanced",
+            estimate_base_nav,
+            return_ratio,
+            method="proxy_exchange_traded_fund_return",
+        )
+        selected = enhanced_result if mode in {"enhanced", "both"} else normalized_result if mode == "normalized" else raw_result
         warnings: list[str] = []
         if profile.stale:
             warnings.append("基金净值使用了过期缓存数据")
@@ -395,6 +422,7 @@ class FundEstimatorService:
             actual_change_date=profile.nav_date,
             raw=raw_result if mode in {"raw", "both"} else None,
             normalized=normalized_result if mode in {"normalized", "both"} else None,
+            enhanced=enhanced_result if mode in {"enhanced", "both"} else None,
             confidence="low",
             notes=notes,
             warnings=warnings,
@@ -474,6 +502,8 @@ class FundEstimatorService:
             actual_change_date=profile.nav_date,
             raw=None,
             normalized=None,
+            enhanced=None,
+            theme_proxy=None,
             confidence="high",
             notes=[
                 "官方净值已经更新，当前返回基金公司/数据源披露的正式净值",
@@ -487,9 +517,10 @@ class FundEstimatorService:
     @staticmethod
     def _select_primary_result(
         *,
-        mode: Literal["raw", "normalized", "both"],
+        mode: Literal["raw", "normalized", "enhanced", "both"],
         raw_result: EstimateModeResult,
         normalized_result: EstimateModeResult | None,
+        enhanced_result: EstimateModeResult | None,
         top10_weight_sum: float,
         usable_weight_sum: float,
     ) -> EstimateModeResult:
@@ -497,9 +528,10 @@ class FundEstimatorService:
             return raw_result
         if mode == "normalized":
             return normalized_result
-        quote_coverage = usable_weight_sum / top10_weight_sum if top10_weight_sum > 0 else 0
-        if top10_weight_sum >= 50 and quote_coverage >= 0.9:
-            return normalized_result
+        if mode == "enhanced":
+            return enhanced_result or raw_result
+        if enhanced_result is not None:
+            return enhanced_result
         return raw_result
 
     async def _fetch_profile(self, code: str) -> FundProfile:
@@ -585,7 +617,7 @@ class FundEstimatorService:
 
     @staticmethod
     def _build_mode_result(
-        mode: Literal["raw", "normalized"],
+        mode: Literal["raw", "normalized", "enhanced"],
         last_nav: float,
         return_ratio: float,
         *,
@@ -598,6 +630,54 @@ class FundEstimatorService:
             estimated_change_pct=round(return_ratio * 100, 4),
             portfolio_return_pct=round(return_ratio * 100, 4),
             method=method,
+        )
+
+    async def _build_enhanced_result(
+        self,
+        *,
+        profile: FundProfile,
+        holdings: FundHoldings,
+        estimate_base_nav: float,
+        raw_return: float,
+        usable_weight_sum: float,
+    ) -> tuple[EstimateModeResult, ThemeProxyEstimate] | None:
+        stock_pct = profile.details.asset_allocation.stock_pct
+        if stock_pct is None:
+            return None
+        residual_stock_weight = max(0.0, min(float(stock_pct), 100.0) - usable_weight_sum)
+        if residual_stock_weight < 1:
+            return None
+
+        candidate = infer_theme_proxy(profile, holdings)
+        if candidate is None:
+            return None
+        try:
+            quotes = await self._get_quotes([candidate.proxy_code])
+        except AppError:
+            return None
+        proxy_quote = quotes.get(candidate.proxy_code)
+        if proxy_quote is None:
+            return None
+
+        proxy_contribution_pct = residual_stock_weight * proxy_quote.change_pct / 100
+        enhanced_return = raw_return + (residual_stock_weight / 100) * proxy_quote.change_ratio
+        theme_proxy = ThemeProxyEstimate(
+            theme=candidate.theme,
+            proxy_code=proxy_quote.stock_code,
+            proxy_name=proxy_quote.stock_name,
+            change_pct=round(proxy_quote.change_pct, 4),
+            weight_pct=round(residual_stock_weight, 4),
+            contribution_pct=round(proxy_contribution_pct, 4),
+            source=proxy_quote.source,
+        )
+        return (
+            self._build_mode_result(
+                "enhanced",
+                estimate_base_nav,
+                enhanced_return,
+                method="top10_holdings_plus_theme_proxy",
+            ),
+            theme_proxy,
         )
 
     @staticmethod

@@ -28,29 +28,7 @@ from fund_estimator.models.schema import (
 from fund_estimator.services.estimator import FundEstimatorService
 from fund_estimator.services.exceptions import AppError
 from fund_estimator.services.http_settings import http_trust_env
-
-
-THEME_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "科技": ("科技", "信息技术", "软件", "计算机", "云计算", "人工智能", "ai", "通信", "电子"),
-    "半导体": ("半导体", "芯片", "集成电路", "电子"),
-    "新能源": ("新能源", "电池", "光伏", "锂电", "储能", "电动车", "新能源汽车"),
-    "医药": ("医药", "医疗", "生物", "创新药", "健康"),
-    "消费": ("消费", "食品", "饮料", "白酒", "家电"),
-    "金融": ("金融", "银行", "证券", "保险"),
-    "互联网": ("互联网", "中概", "港股通互联网", "海外中国互联网"),
-    "军工": ("军工", "国防"),
-    "红利": ("红利", "股息", "高股息"),
-    "油气": ("原油", "油气", "石油", "能源"),
-    "黄金": ("黄金", "贵金属"),
-    "债券": ("债", "信用债", "利率债", "可转债"),
-}
-
-THEME_RELATED: dict[str, set[str]] = {
-    "科技": {"半导体", "互联网"},
-    "半导体": {"科技"},
-    "互联网": {"科技"},
-    "新能源": {"科技"},
-}
+from fund_estimator.services.theme_proxy import THEME_KEYWORDS, THEME_RELATED
 
 STRATEGY_LABELS: dict[CompareStrategy, str] = {
     "balanced": "稳健综合",

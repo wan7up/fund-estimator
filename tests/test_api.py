@@ -71,6 +71,7 @@ def test_estimate_and_watchlist(tmp_path, monkeypatch):
     assert body["fund_code"] == "001438"
     assert body["raw"] is not None
     assert body["normalized"] is not None
+    assert "enhanced" in body
     assert body["confidence"] in {"high", "medium", "low"}
     assert body["actual_change_pct"] == 3.03
     assert body["fund_details"]["stage_returns"]["one_month_pct"] == 18.6

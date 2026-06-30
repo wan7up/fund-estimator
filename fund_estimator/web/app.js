@@ -170,6 +170,7 @@ function scrollToFundCard(code) {
 
 function estimateMethodText(est) {
   if (isProxyEstimate(est)) return "按场内代理走势";
+  if (est?.primary_mode === "enhanced") return "按关联板块修正";
   if (est?.primary_mode === "asset_scaled") return "按股票仓位修正";
   if (est?.primary_mode === "normalized") return "按前十股票走势";
   return "按披露占比估算";
@@ -197,6 +198,8 @@ function unavailableEstimate(item, result) {
     top10_weight_sum: 0,
     raw: null,
     normalized: null,
+    enhanced: null,
+    theme_proxy: null,
     holdings: [],
     notes: [error.message || "本基金暂时无法预计"],
     warnings: [],
@@ -310,6 +313,18 @@ function holdingsContributionHtml(est) {
             </div>`;
         })
         .join("")}
+    </div>`;
+}
+
+function themeProxyRowHtml(est) {
+  const proxy = est?.theme_proxy;
+  if (!proxy) return "";
+  const pctClass = clsForPct(proxy.change_pct || 0);
+  return `
+    <div class="fund-card-row theme-proxy-row">
+      <span>关联板块 · ${escapeHtml(proxy.theme)}</span>
+      <strong class="${pctClass}">${fmtPct(proxy.change_pct)}</strong>
+      <small>${escapeHtml(proxy.proxy_name || proxy.proxy_code)} · 代理${fmt(proxy.weight_pct, 2)}%</small>
     </div>`;
 }
 
@@ -522,6 +537,7 @@ function renderCard(item) {
         ${fundBasicHtml(est)}
         ${estimateBoxesHtml(est)}
         ${holdingsToggleHtml(est, est.fund_code, estimateDate, holdingMove)}
+        ${themeProxyRowHtml(est)}
         <div class="fund-card-row">
           <span>${coverageLabel(est)}</span>
           <strong>--</strong>
@@ -546,6 +562,7 @@ function renderCard(item) {
       ${fundBasicHtml(est)}
       ${estimateBoxesHtml(est)}
       ${holdingsToggleHtml(est, est.fund_code, estimateDate, holdingMove)}
+      ${themeProxyRowHtml(est)}
       <div class="fund-card-row">
         <span>${coverageLabel(est)}</span>
         <strong>${coverageText(est)}</strong>
@@ -598,6 +615,7 @@ function renderDetail(code) {
   els.summaryStrip.innerHTML = `
     ${fundBasicHtml(est)}
     ${estimateBoxesHtml(est)}
+    ${themeProxyRowHtml(est)}
     <div class="fund-basic compact-basic">
       <div>
         <span>${moveLabel(est)}</span>

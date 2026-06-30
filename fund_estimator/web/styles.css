@@ -794,6 +794,22 @@ tbody tr.recently-added {
   font-size: 12px;
 }
 
+.theme-proxy-row {
+  flex-wrap: wrap;
+}
+
+.theme-proxy-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.theme-proxy-row small {
+  flex: 1 0 100%;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: left;
+}
+
 .fund-card-value {
   text-align: right;
 }

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from fund_estimator.models.schema import FundHoldings, FundProfile, HoldingItem, StockQuote
+from fund_estimator.models.schema import FundAssetAllocation, FundDetailInfo, FundHoldings, FundProfile, HoldingItem, StockQuote
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.estimator import MARKET_TZ, FundEstimatorService
 from fund_estimator.services.exceptions import DataSourceError
@@ -80,8 +80,33 @@ class FakeQuoteSource:
                 market="SZ",
                 source="fake",
             ),
+            "515880": StockQuote(
+                stock_code="515880",
+                stock_name="通信ETF",
+                latest_price=1.04,
+                previous_close=1.0,
+                change_pct=4.0,
+                quote_time=datetime.now(),
+                market="SH",
+                source="fake",
+            ),
         }
         return {code: quote for code, quote in data.items() if code in stock_codes and code not in self.missing}
+
+
+class ThemedFundSource(FakeFundSource):
+    async def get_profile(self, code: str) -> FundProfile:
+        profile = await super().get_profile(code)
+        profile.details = FundDetailInfo(asset_allocation=FundAssetAllocation(stock_pct=90.0))
+        return profile
+
+
+class CpoHoldingsSource(FakeHoldingsSource):
+    async def get_holdings(self, code: str) -> FundHoldings:
+        holdings = await super().get_holdings(code)
+        holdings.items[0].stock_name = "长飞光纤"
+        return holdings
+
 
 class OfficialNavFundSource(FakeFundSource):
     async def get_profile(self, code: str) -> FundProfile:
@@ -156,9 +181,9 @@ def test_raw_and_normalized_estimates(tmp_path):
     assert result.raw.estimated_change_pct == 0.75
     assert result.normalized.estimated_nav == 10.1
     assert result.normalized.estimated_change_pct == 1.0
-    assert result.primary_mode == "normalized"
-    assert result.estimated_nav == 10.1
-    assert result.estimated_change_pct == 1.0
+    assert result.primary_mode == "raw"
+    assert result.estimated_nav == 10.075
+    assert result.estimated_change_pct == 0.75
     assert result.official_nav == 10.0
     expected_official_date = FundEstimatorService._previous_trading_day(FundEstimatorService._current_estimate_date())
     assert result.official_nav_date == expected_official_date
@@ -167,6 +192,29 @@ def test_raw_and_normalized_estimates(tmp_path):
     assert result.actual_change_date == expected_official_date
     assert result.top10_weight_sum == 75.0
     assert result.usable_weight_sum == 75.0
+
+
+def test_enhanced_estimate_uses_theme_proxy_for_residual_stock_position(tmp_path):
+    service = FundEstimatorService(
+        fund_source=ThemedFundSource(),
+        holdings_source=CpoHoldingsSource(),
+        quote_source=FakeQuoteSource(),
+        cache=SQLiteCache(tmp_path / "enhanced.sqlite3"),
+        allow_mock_fallback=False,
+    )
+
+    result = asyncio.run(service.estimate("123456", mode="both"))
+
+    assert result.raw is not None
+    assert result.enhanced is not None
+    assert result.theme_proxy is not None
+    assert result.theme_proxy.theme == "CPO/通信"
+    assert result.theme_proxy.proxy_code == "515880"
+    assert result.theme_proxy.weight_pct == 15.0
+    assert result.raw.estimated_change_pct == 0.75
+    assert result.enhanced.estimated_change_pct == 1.35
+    assert result.primary_mode == "enhanced"
+    assert result.estimated_change_pct == 1.35
 
 
 def test_current_day_official_nav_uses_official_state(tmp_path):
@@ -186,9 +234,9 @@ def test_current_day_official_nav_uses_official_state(tmp_path):
     assert result.official_nav_date == datetime.now(MARKET_TZ).date()
     assert result.actual_change_pct == 5.0
     assert result.actual_change_date == datetime.now(MARKET_TZ).date()
-    assert result.estimated_nav == 10.1
+    assert result.estimated_nav == 10.075
     assert result.estimated_nav_date == FundEstimatorService._current_estimate_date()
-    assert result.estimated_change_pct == 1.0
+    assert result.estimated_change_pct == 0.75
     assert result.raw is not None
     assert result.normalized is not None
     assert result.holdings
@@ -216,9 +264,9 @@ def test_official_nav_matching_estimate_date_keeps_comparison_estimate(tmp_path,
     assert result.official_nav == 9.6041
     assert result.official_nav_date == date(2026, 5, 26)
     assert result.actual_change_pct == -2.25
-    assert result.estimated_nav == 9.9238
+    assert result.estimated_nav == 9.8992
     assert result.estimated_nav_date == date(2026, 5, 26)
-    assert result.estimated_change_pct == 1.0
+    assert result.estimated_change_pct == 0.75
     assert result.raw is not None
     assert result.normalized is not None
 
@@ -242,9 +290,9 @@ def test_before_open_holds_official_state_with_comparison_estimate(tmp_path, mon
     assert result.is_official_nav is True
     assert result.valuation_status == "official_nav"
     assert result.official_nav_date == date(2026, 5, 26)
-    assert result.estimated_nav == 9.9238
+    assert result.estimated_nav == 9.8992
     assert result.estimated_nav_date == date(2026, 5, 26)
-    assert result.estimated_change_pct == 1.0
+    assert result.estimated_change_pct == 0.75
     assert result.raw is not None
 
 
