@@ -664,7 +664,7 @@ class FundEstimatorService:
         theme_proxy = ThemeProxyEstimate(
             theme=candidate.theme,
             proxy_code=proxy_quote.stock_code,
-            proxy_name=proxy_quote.stock_name,
+            proxy_name=candidate.proxy_name,
             change_pct=round(proxy_quote.change_pct, 4),
             weight_pct=round(residual_stock_weight, 4),
             contribution_pct=round(proxy_contribution_pct, 4),

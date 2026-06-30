@@ -52,23 +52,25 @@ THEME_RELATED: dict[str, set[str]] = {
 class ThemeProxyCandidate:
     theme: str
     proxy_code: str
+    proxy_name: str
     keywords: tuple[str, ...]
     min_score: int = 3
 
 
 THEME_PROXY_CANDIDATES: tuple[ThemeProxyCandidate, ...] = (
-    ThemeProxyCandidate("CPO/通信", "515880", THEME_KEYWORDS["CPO/通信"], min_score=2),
-    ThemeProxyCandidate("半导体", "512480", THEME_KEYWORDS["半导体"]),
-    ThemeProxyCandidate("人工智能", "159819", THEME_KEYWORDS["人工智能"]),
-    ThemeProxyCandidate("互联网", "513050", THEME_KEYWORDS["互联网"]),
-    ThemeProxyCandidate("新能源", "516160", THEME_KEYWORDS["新能源"]),
-    ThemeProxyCandidate("医药", "512010", THEME_KEYWORDS["医药"]),
-    ThemeProxyCandidate("消费", "159928", THEME_KEYWORDS["消费"]),
-    ThemeProxyCandidate("金融", "512880", THEME_KEYWORDS["金融"]),
-    ThemeProxyCandidate("军工", "512660", THEME_KEYWORDS["军工"]),
-    ThemeProxyCandidate("红利", "510880", THEME_KEYWORDS["红利"]),
-    ThemeProxyCandidate("黄金", "518880", THEME_KEYWORDS["黄金"]),
-    ThemeProxyCandidate("科技", "515000", THEME_KEYWORDS["科技"]),
+    # Recent NAV-return checks on 011370 showed 159994/515050 track the fund better than 515880.
+    ThemeProxyCandidate("CPO/通信", "159994", "通信ETF银华", THEME_KEYWORDS["CPO/通信"], min_score=2),
+    ThemeProxyCandidate("半导体", "512480", "半导体ETF", THEME_KEYWORDS["半导体"]),
+    ThemeProxyCandidate("人工智能", "159819", "人工智能ETF", THEME_KEYWORDS["人工智能"]),
+    ThemeProxyCandidate("互联网", "513050", "中概互联网ETF", THEME_KEYWORDS["互联网"]),
+    ThemeProxyCandidate("新能源", "516160", "新能源ETF", THEME_KEYWORDS["新能源"]),
+    ThemeProxyCandidate("医药", "512010", "医药ETF", THEME_KEYWORDS["医药"]),
+    ThemeProxyCandidate("消费", "159928", "消费ETF", THEME_KEYWORDS["消费"]),
+    ThemeProxyCandidate("金融", "512880", "证券ETF", THEME_KEYWORDS["金融"]),
+    ThemeProxyCandidate("军工", "512660", "军工ETF", THEME_KEYWORDS["军工"]),
+    ThemeProxyCandidate("红利", "510880", "红利ETF", THEME_KEYWORDS["红利"]),
+    ThemeProxyCandidate("黄金", "518880", "黄金ETF", THEME_KEYWORDS["黄金"]),
+    ThemeProxyCandidate("科技", "515000", "科技ETF", THEME_KEYWORDS["科技"]),
 )
 
 

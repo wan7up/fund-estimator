@@ -172,6 +172,15 @@ python scripts/backtest_estimates.py 011370 001438 --days 30 --json
 
 脚本会比较 `raw`、`normalized`、`enhanced` 与官方日涨跌幅的平均绝对误差。注意它使用当前可取得的最近一期持仓回看近期行情，并不代表历史当天真实持仓，因此只适合研究估值口径方向，不适合当作严格绩效归因。
 
+关联板块代理 ETF 也可以单独验证。脚本会把目标基金和候选 ETF 的官方净值日涨跌幅对齐，按平均绝对误差和相关性排序：
+
+```bash
+python scripts/select_theme_proxy.py 011370 --theme cpo --days 20
+python scripts/select_theme_proxy.py 011370 --candidates 159994 515050 515880 159507 --days 30 --json
+```
+
+代理选择原则是：先从同主题可实时报价 ETF 中形成候选池，再优先选择历史官方涨跌 MAE 更低、相关性更高的候选。这个结果只作为当前主题代理的证据，后续如果基金风格或市场 ETF 产品发生变化，应重新跑脚本确认。
+
 ## 数据源与缓存
 
 真实数据源通过 provider 层封装：

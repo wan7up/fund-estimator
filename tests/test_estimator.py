@@ -80,8 +80,8 @@ class FakeQuoteSource:
                 market="SZ",
                 source="fake",
             ),
-            "515880": StockQuote(
-                stock_code="515880",
+            "159994": StockQuote(
+                stock_code="159994",
                 stock_name="通信ETF",
                 latest_price=1.04,
                 previous_close=1.0,
@@ -209,7 +209,8 @@ def test_enhanced_estimate_uses_theme_proxy_for_residual_stock_position(tmp_path
     assert result.enhanced is not None
     assert result.theme_proxy is not None
     assert result.theme_proxy.theme == "CPO/通信"
-    assert result.theme_proxy.proxy_code == "515880"
+    assert result.theme_proxy.proxy_code == "159994"
+    assert result.theme_proxy.proxy_name == "通信ETF银华"
     assert result.theme_proxy.weight_pct == 15.0
     assert result.raw.estimated_change_pct == 0.75
     assert result.enhanced.estimated_change_pct == 1.35
