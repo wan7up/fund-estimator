@@ -759,7 +759,7 @@ class FundComparisonService:
             reasons.append("基金经理任职或星级信息较有优势")
         if not candidate.holdings:
             reasons.append("缺少可解析前十大持仓，持仓相似度参考价值有限")
-        return reasons[:5] or ["基础数据完整度一般，建议结合外部基金档案复核"]
+        return reasons[:5] or ["分项优势不突出，主要按综合评分和候选基金内相对位置排序"]
 
     @staticmethod
     def _pair_reasons(
@@ -807,7 +807,7 @@ class FundComparisonService:
         unrelated_pairs = self._pair_labels(fund_results, pair_similarities, relation="not_comparable", limit=4)
         outlier_labels = self._outlier_labels(fund_results, pair_similarities)
         theme_text = self._theme_section(theme_analysis)
-        style_text = self._style_section(fund_results)
+        style_text = self._style_section(fund_results, theme_analysis)
         choice_text = self._choice_section(fund_results, conclusion, strategy, theme_analysis)
         if conclusion == "not_comparable":
             parts = ["整体判断：这组基金不能作为一个整体强行排名。"]
@@ -951,7 +951,7 @@ class FundComparisonService:
             parts.append(f"规模约{float(snapshot.scale_billion):.2f}亿")
         if snapshot.purchase_limit_yuan is not None:
             parts.append(f"限购金额{_format_yuan(snapshot.purchase_limit_yuan)}")
-        return "、".join(parts) if parts else "仓位、规模或持仓集中度披露较少，需要结合详情页确认"
+        return "、".join(parts) if parts else "仓位、规模和持仓集中度披露不足，稳妥判断依据有限"
 
     @staticmethod
     def _theme_section(theme_analysis: CompareThemeAnalysis) -> str:
@@ -959,13 +959,14 @@ class FundComparisonService:
         title = "板块匹配" if theme_analysis.theme_hint else "板块线索"
         return f"{title}：\n" + theme_analysis.summary + ("\n" + "\n".join(lines) if lines else "")
 
-    def _style_section(self, fund_results: list[CompareFundResult]) -> str:
-        lines = [f"- {self._fund_style_summary(item)}" for item in fund_results]
+    def _style_section(self, fund_results: list[CompareFundResult], theme_analysis: CompareThemeAnalysis) -> str:
+        exposure_by_code = {item.code: item for item in theme_analysis.exposures}
+        lines = [f"- {self._fund_style_summary(item, exposure_by_code.get(item.code))}" for item in fund_results]
         return "逐只风格：\n" + "\n".join(lines)
 
-    def _fund_style_summary(self, item: CompareFundResult) -> str:
+    def _fund_style_summary(self, item: CompareFundResult, theme_exposure: CompareThemeExposure | None) -> str:
         snapshot = item.snapshot
-        theme_text = self._theme_summary(item)
+        theme_text = self._theme_summary(item, theme_exposure)
         allocation_text = self._allocation_style(snapshot.stock_pct, snapshot.bond_pct)
         holdings_text = self._holdings_style(snapshot.top10_weight_sum)
         scale_text = self._scale_style(snapshot.scale_billion)
@@ -978,7 +979,9 @@ class FundComparisonService:
             f"{holdings_text}，{scale_text}，{performance_text}，{manager_text}，{trade_text}。{role_text}"
         )
 
-    def _theme_summary(self, item: CompareFundResult) -> str:
+    def _theme_summary(self, item: CompareFundResult, theme_exposure: CompareThemeExposure | None) -> str:
+        if theme_exposure and theme_exposure.inferred_themes:
+            return f"主题线索偏{'、'.join(theme_exposure.inferred_themes[:2])}"
         text = f"{item.name} {item.fund_type or ''}".lower()
         themes = sorted(self._theme_tokens(text))
         if themes:
@@ -992,7 +995,9 @@ class FundComparisonService:
             return "风格上偏价值"
         if "红利" in item.name:
             return "风格上偏红利/股息"
-        return "主题特征需要结合持仓进一步确认"
+        if item.snapshot.holdings_date:
+            return "未从名称和前十大持仓识别出明确板块"
+        return "持仓数据不可用，主题只按名称和类型判断"
 
     @staticmethod
     def _allocation_style(stock_pct: float | None, bond_pct: float | None) -> str:

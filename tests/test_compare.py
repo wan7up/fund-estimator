@@ -73,6 +73,7 @@ PROFILES = {
     "100002": profile("100002", "测试科技半导体精选C", "混合型", one_year=42, stock=86, bond=0, cash=7, fee=0.0, scale=12, percentile=95),
     "100003": profile("100003", "测试半导体先锋混合A", "混合型", one_year=60, stock=93, bond=0, cash=4, fee=0.15, scale=5, percentile=91),
     "200001": profile("200001", "测试稳健债券A", "债券型", one_year=5, stock=4, bond=88, cash=4, fee=0.08, scale=50, percentile=83),
+    "300002": profile("300002", "测试主题未明混合A", "混合型", one_year=28, stock=82, bond=0, cash=8, fee=0.1, scale=9, percentile=88),
 }
 
 HOLDINGS = {
@@ -109,6 +110,16 @@ HOLDINGS = {
             HoldingItem(stock_code="603501", stock_name="韦尔股份", weight_pct=12, market="SH"),
         ],
     ),
+    "300002": FundHoldings(
+        fund_code="300002",
+        holdings_date=date(2026, 3, 31),
+        source="fake",
+        items=[
+            HoldingItem(stock_code="688111", stock_name="半导体芯片设备", weight_pct=18, market="SH"),
+            HoldingItem(stock_code="688222", stock_name="集成电路材料", weight_pct=16, market="SH"),
+            HoldingItem(stock_code="688333", stock_name="电子制造龙头", weight_pct=12, market="SH"),
+        ],
+    ),
 }
 
 QUOTES = {
@@ -122,7 +133,7 @@ QUOTES = {
         market="SH" if code.startswith("6") else "SZ",
         source="fake",
     )
-    for code in {"600000", "000001", "600519", "300750", "688981", "002371", "300782", "603501"}
+    for code in {"600000", "000001", "600519", "300750", "688981", "002371", "300782", "603501", "688111", "688222", "688333"}
 }
 
 
@@ -281,6 +292,18 @@ def test_theme_analysis_without_hint_only_reports_inferred_themes(tmp_path):
     assert "板块线索" in result.recommendation
     assert all("未填写目标板块" not in item.comment for item in result.theme_analysis.exposures)
     assert all(item.match_level == "match" for item in result.theme_analysis.exposures)
+
+
+def test_style_summary_uses_holdings_theme_evidence(tmp_path):
+    result = compare(tmp_path, ["300002", "100003"])
+
+    assert result.theme_analysis is not None
+    exposure = next(item for item in result.theme_analysis.exposures if item.code == "300002")
+    assert "半导体" in exposure.inferred_themes
+    assert "测试主题未明混合A（300002）" in result.recommendation
+    assert "主题线索偏半导体" in result.recommendation
+    assert "需要结合持仓进一步确认" not in result.recommendation
+    assert "结合外部基金档案复核" not in result.recommendation
 
 
 def test_mixed_group_explains_similar_pairs_and_outliers(tmp_path):
