@@ -1,4 +1,5 @@
 const DEVICE_ID_KEY = "fund_estimator_device_id";
+const DAILY_ESTIMATE_CACHE_PREFIX = "fund_estimator_daily_estimates_v1";
 
 function createDeviceId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -407,11 +408,77 @@ async function loadSourceStatus() {
 
 async function loadWatchlist() {
   state.watchlist = await api("/api/watchlist");
-  renderRows();
-  await refreshEstimates();
+  const restored = restoreTodayEstimateCache();
+  if (!restored) renderRows();
+  await refreshEstimates({ background: restored });
 }
 
-async function refreshEstimates() {
+function todayEstimateCacheKey(today = localDateText()) {
+  return `${DAILY_ESTIMATE_CACHE_PREFIX}:${state.deviceId}:${today}`;
+}
+
+function pruneOldEstimateCaches(today = localDateText()) {
+  try {
+    const keepKey = todayEstimateCacheKey(today);
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+      if (key && key.startsWith(`${DAILY_ESTIMATE_CACHE_PREFIX}:`) && key !== keepKey) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // localStorage may be disabled in private browsing; live refresh still works.
+  }
+}
+
+function restoreTodayEstimateCache() {
+  if (!state.watchlist.length) return false;
+  const today = localDateText();
+  pruneOldEstimateCaches(today);
+  try {
+    const raw = window.localStorage.getItem(todayEstimateCacheKey(today));
+    if (!raw) return false;
+    const payload = JSON.parse(raw);
+    if (payload?.date !== today || !Array.isArray(payload.results)) return false;
+    const watchCodes = new Set(state.watchlist.map((item) => item.code));
+    const nextEstimates = new Map();
+    for (const item of payload.results) {
+      if (item?.code && watchCodes.has(item.code)) {
+        nextEstimates.set(item.code, item);
+      }
+    }
+    if (!nextEstimates.size) return false;
+    state.estimates = nextEstimates;
+    const codes = state.watchlist.map((item) => item.code);
+    if (!state.selectedCode || !codes.includes(state.selectedCode)) {
+      state.selectedCode = codes[0];
+    }
+    renderRows();
+    renderDetail(state.selectedCode);
+    els.statusText.textContent = `显示今日上次结果 · 后台刷新中`;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function saveTodayEstimateCache(results) {
+  try {
+    const today = localDateText();
+    const payload = {
+      date: today,
+      savedAt: new Date().toISOString(),
+      results,
+    };
+    window.localStorage.setItem(todayEstimateCacheKey(today), JSON.stringify(payload));
+    pruneOldEstimateCaches(today);
+  } catch {
+    // Cache is only a display accelerator; ignore storage failures.
+  }
+}
+
+async function refreshEstimates(options = {}) {
+  const background = Boolean(options.background);
   if (state.refreshInFlight) return;
   if (!state.watchlist.length) {
     els.statusText.textContent = "暂无自选";
@@ -419,13 +486,14 @@ async function refreshEstimates() {
     return;
   }
   state.refreshInFlight = true;
-  els.statusText.textContent = "刷新中";
+  els.statusText.textContent = background ? "显示今日上次结果 · 后台刷新中" : "刷新中";
   try {
     const codes = state.watchlist.map((item) => item.code);
     const results = await api("/api/estimate/batch", {
       method: "POST",
       body: JSON.stringify({ codes, mode: "both" }),
     });
+    saveTodayEstimateCache(results);
     state.estimates.clear();
     for (const item of results) {
       state.estimates.set(item.code, item);

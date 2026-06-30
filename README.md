@@ -161,6 +161,8 @@ enhanced_return = raw_return + residual_stock_weight * theme_proxy_return
 
 页面主展示优先使用 `enhanced`；如果没有可识别的关联板块或代理行情，则退回 `raw`。
 
+前端会把当天成功返回的自选基金估值结果保存到浏览器本地缓存。当天再次打开页面时会先显示“今日上次结果”，同时后台刷新实时估值；跨天后不会显示上一天缓存，避免把旧交易日结果误当成当天数据。
+
 ## 回测研究
 
 可以用脚本对最近官方净值日做粗略误差对比：
@@ -180,6 +182,14 @@ python scripts/select_theme_proxy.py 011370 --candidates 159994 515050 515880 15
 ```
 
 代理选择原则是：先从同主题可实时报价 ETF 中形成候选池，再优先选择历史官方涨跌 MAE 更低、相关性更高的候选。这个结果只作为当前主题代理的证据，后续如果基金风格或市场 ETF 产品发生变化，应重新跑脚本确认。
+
+服务器可每周对所有自选基金做一次代理复核，默认只写报告，不自动切换口径：
+
+```bash
+python scripts/check_theme_proxy_weekly.py --db data/fund_estimator.sqlite3 --out data/theme_proxy_weekly/latest.json
+```
+
+报告会比较当前代理和候选代理，默认只有新代理最近 20 个重合净值日 MAE 至少改善 `0.15%`，且相关性没有明显变差时，才标记为“建议切换”。这样可以避免代理在相近 ETF 之间频繁来回跳。
 
 ## 数据源与缓存
 
