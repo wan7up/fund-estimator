@@ -211,6 +211,7 @@ python scripts/select_theme_proxy.py 011370 --candidates 159994 515050 515880 15
 - `FUND_ESTIMATOR_DB`：SQLite 文件路径。
 - `FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK=0`：关闭 mock 兜底。
 - `FUND_ESTIMATOR_FORCE_MOCK=1`：强制使用内置演示数据。
+- `FUND_ESTIMATOR_BATCH_CONCURRENCY=4`：自选基金批量估值并发数，默认 4，允许范围 1-8。
 - `LOF_NOTICE_DIR`：LOF 通知状态与 ledger 目录，默认跟随 `FUND_ESTIMATOR_DB` 所在目录或 `data/`。
 - `LOF_NOTICE_ENABLED=1`：启用 LOF worker 飞书通知。
 - `LOF_FEISHU_TIMEOUT_SECONDS=30`：飞书接入和发送接口超时时间。

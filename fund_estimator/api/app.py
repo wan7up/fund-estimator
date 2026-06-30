@@ -90,6 +90,14 @@ def normalize_device_id(device_id: str | None) -> str:
     return value or "default"
 
 
+def int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
 def get_runtime_config() -> dict[str, object]:
     allow_mock_fallback = os.getenv("FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK", "0") == "1"
     force_mock = os.getenv("FUND_ESTIMATOR_FORCE_MOCK", "0") == "1"
@@ -103,7 +111,13 @@ def get_runtime_config() -> dict[str, object]:
         "provider": "mock" if force_mock else "eastmoney+sina",
         "mode": "mock" if force_mock else "real",
         "background_scan_enabled": os.getenv("FUND_ESTIMATOR_BACKGROUND_SCAN", "0") == "1",
-        "background_scan_interval_seconds": int(os.getenv("FUND_ESTIMATOR_SCAN_INTERVAL_SECONDS", "60")),
+        "background_scan_interval_seconds": int_env(
+            "FUND_ESTIMATOR_SCAN_INTERVAL_SECONDS",
+            60,
+            minimum=15,
+            maximum=3600,
+        ),
+        "estimate_batch_concurrency": int_env("FUND_ESTIMATOR_BATCH_CONCURRENCY", 4, minimum=1, maximum=8),
         "lof_notice_scheduler_enabled": os.getenv(
             "FUND_ESTIMATOR_LOF_NOTICE_SCHEDULER",
             "0" if force_mock else "1",
@@ -310,19 +324,23 @@ def create_app() -> FastAPI:
 
     @app.post("/api/estimate/batch", response_model=list[BatchEstimateItem])
     async def estimate_batch(request: BatchEstimateRequest) -> list[BatchEstimateItem]:
-        results: list[BatchEstimateItem] = []
-        for code in request.codes:
-            try:
-                item = await estimator.estimate(code, mode=request.mode)
-                results.append(BatchEstimateItem(code=code, ok=True, estimate=item))
-            except AppError as exc:
-                profile: FundProfile | None = None
+        concurrency = int(runtime_config["estimate_batch_concurrency"])
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def estimate_one(code: str) -> BatchEstimateItem:
+            async with semaphore:
                 try:
-                    profile = await estimator.get_profile(code)
-                except AppError:
-                    profile = None
-                results.append(BatchEstimateItem(code=code, ok=False, profile=profile, error=exc.to_error()))
-        return results
+                    item = await estimator.estimate(code, mode=request.mode)
+                    return BatchEstimateItem(code=code, ok=True, estimate=item)
+                except AppError as exc:
+                    profile: FundProfile | None = None
+                    try:
+                        profile = await estimator.get_profile(code)
+                    except AppError:
+                        profile = None
+                    return BatchEstimateItem(code=code, ok=False, profile=profile, error=exc.to_error())
+
+        return await asyncio.gather(*(estimate_one(code) for code in request.codes))
 
     @app.post("/api/compare", response_model=CompareResponse)
     async def compare_funds(request: CompareRequest) -> CompareResponse:
