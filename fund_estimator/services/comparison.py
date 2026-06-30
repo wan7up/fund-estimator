@@ -125,6 +125,7 @@ class FundComparisonService:
             pair_similarities,
             request.strategy,
             theme_analysis,
+            candidates,
         )
         warnings = self._global_warnings(candidates, pair_similarities, conclusion)
         return CompareResponse(
@@ -799,6 +800,7 @@ class FundComparisonService:
         pair_similarities: list[ComparePairSimilarity],
         strategy: CompareStrategy,
         theme_analysis: CompareThemeAnalysis,
+        candidates: list[CompareCandidate],
     ) -> tuple[str | None, str]:
         if not fund_results:
             return None, "没有可用于比较的基金数据。"
@@ -808,7 +810,10 @@ class FundComparisonService:
         outlier_labels = self._outlier_labels(fund_results, pair_similarities)
         theme_text = self._theme_section(theme_analysis)
         style_text = self._style_section(fund_results, theme_analysis)
+        performance_gap_text = self._performance_gap_section(fund_results, pair_similarities, candidates)
         choice_text = self._choice_section(fund_results, conclusion, strategy, theme_analysis)
+        detail_sections = [theme_text, performance_gap_text, style_text, choice_text]
+        detail_sections = [section for section in detail_sections if section]
         if conclusion == "not_comparable":
             parts = ["整体判断：这组基金不能作为一个整体强行排名。"]
             if similar_pairs:
@@ -819,7 +824,7 @@ class FundComparisonService:
                 parts.append(f"低相关组合包括 {self._join_labels(unrelated_pairs)}。")
             overview = "".join(parts)
             advice = "购买取舍：先按板块/资产类型拆成小组；在相似小组内用综合分择优，偏离目标板块的基金单独说明用途，不和主目标基金混排。"
-            return None, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
+            return None, "\n\n".join([overview, *detail_sections, advice])
         best = fund_results[0]
         runner_up = fund_results[1] if len(fund_results) > 1 else None
         reason_text = "、".join(best.reasons[:3])
@@ -834,7 +839,7 @@ class FundComparisonService:
                 "购买取舍：如果只想保留一只，优先买综合分更高者；如果两只分别是 A/C 或同指数不同份额，"
                 "再结合费率、限购金额和你实际买入渠道确认，费率与限购只作为交易便利性参考，不参与评分。"
             )
-            return best.code, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
+            return best.code, "\n\n".join([overview, *detail_sections, advice])
         relation_hint = ""
         if similar_pairs:
             relation_hint += f"其中 {self._join_labels(similar_pairs)} 高度相似；"
@@ -849,7 +854,158 @@ class FundComparisonService:
             "如果更在意持有体验，优先看规模适中、前十大集中度不过高、风格更清晰且限购不影响买入的基金。"
             "最终要和你的板块暴露目标对齐，而不是只看总分。"
         )
-        return best.code, "\n\n".join([overview, theme_text, style_text, choice_text, advice])
+        return best.code, "\n\n".join([overview, *detail_sections, advice])
+
+    def _performance_gap_section(
+        self,
+        fund_results: list[CompareFundResult],
+        pair_similarities: list[ComparePairSimilarity],
+        candidates: list[CompareCandidate],
+    ) -> str | None:
+        result_by_code = {item.code: item for item in fund_results}
+        candidate_by_code = {item.code: item for item in candidates}
+        lines: list[str] = []
+        comparable_pairs = [pair for pair in pair_similarities if pair.relation != "not_comparable"]
+        comparable_pairs.sort(key=lambda pair: self._pair_return_gap(result_by_code.get(pair.code_a), result_by_code.get(pair.code_b)), reverse=True)
+        for pair in comparable_pairs:
+            left = result_by_code.get(pair.code_a)
+            right = result_by_code.get(pair.code_b)
+            if not left or not right:
+                continue
+            gaps = self._return_gap_details(left, right)
+            if not gaps:
+                continue
+            main_label, main_gap, leader = gaps[0]
+            follower = right if leader.code == left.code else left
+            reverse_labels = [label for label, _, item in gaps[1:] if item.code == follower.code]
+            line = (
+                f"{leader.name}（{leader.code}）{main_label}领先{follower.name}（{follower.code}）{_format_pp(abs(main_gap))}"
+            )
+            if reverse_labels:
+                line += f"，但{follower.name}在{'、'.join(reverse_labels[:2])}更强，说明差异还包含阶段节奏。"
+            else:
+                line += "。"
+            lines.append(line)
+            lines.extend(
+                self._gap_driver_lines(
+                    leader,
+                    follower,
+                    pair,
+                    candidate_by_code.get(leader.code),
+                    candidate_by_code.get(follower.code),
+                )
+            )
+            if len(lines) >= 4:
+                break
+        if not lines:
+            return None
+        return "涨幅差异：\n" + "\n".join(f"- {line}" for line in lines[:4])
+
+    @staticmethod
+    def _pair_return_gap(left: CompareFundResult | None, right: CompareFundResult | None) -> float:
+        if not left or not right:
+            return 0.0
+        gaps = FundComparisonService._return_gap_details(left, right)
+        return abs(gaps[0][1]) if gaps else 0.0
+
+    @staticmethod
+    def _return_gap_details(left: CompareFundResult, right: CompareFundResult) -> list[tuple[str, float, CompareFundResult]]:
+        periods = [
+            ("近1年", left.snapshot.one_year_pct, right.snapshot.one_year_pct, 15.0),
+            ("近6月", left.snapshot.six_month_pct, right.snapshot.six_month_pct, 10.0),
+            ("近3月", left.snapshot.three_month_pct, right.snapshot.three_month_pct, 8.0),
+            ("近1月", left.snapshot.one_month_pct, right.snapshot.one_month_pct, 5.0),
+        ]
+        gaps: list[tuple[str, float, CompareFundResult]] = []
+        for label, left_value, right_value, threshold in periods:
+            if left_value is None or right_value is None:
+                continue
+            gap = float(left_value) - float(right_value)
+            if abs(gap) >= threshold:
+                gaps.append((label, gap, left if gap > 0 else right))
+        gaps.sort(key=lambda item: abs(item[1]), reverse=True)
+        return gaps
+
+    def _gap_driver_lines(
+        self,
+        leader: CompareFundResult,
+        follower: CompareFundResult,
+        pair: ComparePairSimilarity,
+        leader_candidate: CompareCandidate | None,
+        follower_candidate: CompareCandidate | None,
+    ) -> list[str]:
+        lines: list[str] = []
+        if pair.holdings_similarity is None:
+            lines.append("前十大持仓数据不完整，涨幅差异主要先看仓位、规模和同类表现。")
+        elif pair.holdings_similarity < 50:
+            lines.append(f"前十大持仓重合只有{pair.holdings_similarity:.2f}%，同板块下买到的细分方向和个股权重明显不同。")
+        elif pair.holdings_similarity < 75:
+            lines.append(f"前十大持仓重合约{pair.holdings_similarity:.2f}%，有共同方向，但权重差仍可能放大涨幅差。")
+        else:
+            lines.append(f"前十大持仓重合约{pair.holdings_similarity:.2f}%，涨幅差更多看费率、规模、仓位微差和跟踪/调仓效率。")
+        holding_line = self._holding_weight_gap_line(leader, follower, leader_candidate, follower_candidate)
+        if holding_line:
+            lines.append(holding_line)
+        allocation_line = self._allocation_gap_line(leader, follower)
+        if allocation_line:
+            lines.append(allocation_line)
+        return lines[:3]
+
+    @staticmethod
+    def _holding_weight_gap_line(
+        leader: CompareFundResult,
+        follower: CompareFundResult,
+        leader_candidate: CompareCandidate | None,
+        follower_candidate: CompareCandidate | None,
+    ) -> str | None:
+        if not leader_candidate or not follower_candidate or not leader_candidate.holdings or not follower_candidate.holdings:
+            return None
+        leader_items = {item.stock_code: item for item in leader_candidate.holdings.items}
+        follower_items = {item.stock_code: item for item in follower_candidate.holdings.items}
+        leader_edges: list[tuple[float, str]] = []
+        follower_edges: list[tuple[float, str]] = []
+        for code in set(leader_items) | set(follower_items):
+            leader_weight = leader_items.get(code).weight_pct if code in leader_items else 0.0
+            follower_weight = follower_items.get(code).weight_pct if code in follower_items else 0.0
+            diff = float(leader_weight) - float(follower_weight)
+            name = (leader_items.get(code) or follower_items.get(code)).stock_name
+            if abs(diff) < 3:
+                continue
+            target = leader_edges if diff > 0 else follower_edges
+            target.append((abs(diff), f"{name}{_format_pp(abs(diff))}"))
+        leader_edges.sort(reverse=True)
+        follower_edges.sort(reverse=True)
+        parts: list[str] = []
+        if leader_edges:
+            parts.append(f"{leader.name}更高权重在{'、'.join(item for _, item in leader_edges[:3])}")
+        if follower_edges:
+            parts.append(f"{follower.name}更高权重在{'、'.join(item for _, item in follower_edges[:3])}")
+        return "；".join(parts) + "。" if parts else None
+
+    @staticmethod
+    def _allocation_gap_line(leader: CompareFundResult, follower: CompareFundResult) -> str | None:
+        leader_stock = leader.snapshot.stock_pct
+        follower_stock = follower.snapshot.stock_pct
+        leader_top10 = leader.snapshot.top10_weight_sum
+        follower_top10 = follower.snapshot.top10_weight_sum
+        leader_scale = leader.snapshot.scale_billion
+        follower_scale = follower.snapshot.scale_billion
+        parts: list[str] = []
+        if leader_stock is not None and follower_stock is not None:
+            stock_gap = float(leader_stock) - float(follower_stock)
+            if abs(stock_gap) < 3:
+                parts.append("股票仓位接近，差异更偏向持仓方向和权重")
+            else:
+                higher = leader if stock_gap > 0 else follower
+                parts.append(f"{higher.name}股票仓位高{_format_pp(abs(stock_gap))}，阶段弹性更足")
+        if leader_top10 is not None and follower_top10 is not None:
+            top10_gap = float(leader_top10) - float(follower_top10)
+            if abs(top10_gap) >= 5:
+                higher = leader if top10_gap > 0 else follower
+                parts.append(f"{higher.name}前十大更集中{_format_pp(abs(top10_gap))}")
+        if leader_scale is not None and follower_scale is not None:
+            parts.append(f"规模分别约{float(leader_scale):.2f}亿和{float(follower_scale):.2f}亿")
+        return "；".join(parts) + "。" if parts else None
 
     def _choice_section(
         self,
@@ -1227,6 +1383,12 @@ def _format_yuan(value: float | None) -> str:
     if abs(amount) >= 10_000:
         return f"{amount / 10_000:.0f}万"
     return f"{amount:.0f}元"
+
+
+def _format_pp(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"{float(value):.2f}个百分点"
 
 
 def _clamp(value: float, low: float, high: float) -> float:

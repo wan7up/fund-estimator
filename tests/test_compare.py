@@ -256,6 +256,8 @@ def test_same_theme_different_funds_are_scored(tmp_path):
     assert "目标板块是“半导体”" in result.theme_analysis.summary
     assert all(item.match_level == "match" for item in result.theme_analysis.exposures)
     assert "板块匹配" in result.recommendation
+    assert "涨幅差异" in result.recommendation
+    assert "前十大持仓重合" in result.recommendation
     assert "逐只风格" in result.recommendation
     assert "股票仓位" in result.recommendation
     assert result.pair_similarities[0].relation == "same_theme_different"

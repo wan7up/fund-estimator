@@ -141,6 +141,7 @@ def test_prompt_preserves_rule_boundaries(tmp_path):
     assert "候选基金研究员" in prompt
     assert "固定输出 4 行纯文本" in prompt
     assert "板块：必须结合 theme_analysis" in prompt
+    assert "涨幅差异" in prompt
     assert "不要复述规则评价原文或评分表" in prompt
     assert "不要写泛泛的基金投资科普" in prompt
     assert "泛泛免责声明" in prompt
