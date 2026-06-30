@@ -302,10 +302,19 @@ def test_style_summary_uses_holdings_theme_evidence(tmp_path):
     assert result.theme_analysis is not None
     exposure = next(item for item in result.theme_analysis.exposures if item.code == "300002")
     assert "半导体" in exposure.inferred_themes
+    assert "半导体设备" in exposure.inferred_themes
+    assert "科技" not in exposure.inferred_themes
     assert "测试主题未明混合A（300002）" in result.recommendation
-    assert "主题线索偏半导体" in result.recommendation
+    assert "主题线索偏半导体设备" in result.recommendation
     assert "需要结合持仓进一步确认" not in result.recommendation
     assert "结合外部基金档案复核" not in result.recommendation
+
+
+def test_fine_grained_tech_theme_suppresses_generic_technology_label():
+    tokens = FundComparisonService._display_theme_tokens({"科技", "CPO/通信", "半导体", "半导体设备"})
+
+    assert tokens[:3] == ["CPO/通信", "半导体设备", "半导体"]
+    assert "科技" not in tokens
 
 
 def test_mixed_group_explains_similar_pairs_and_outliers(tmp_path):

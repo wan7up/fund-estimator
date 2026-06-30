@@ -66,6 +66,30 @@ STRATEGY_WEIGHTS: dict[CompareStrategy, dict[str, float]] = {
     },
 }
 
+THEME_DISPLAY_ORDER = (
+    "CPO/通信",
+    "半导体设备",
+    "芯片设计",
+    "半导体材料",
+    "半导体",
+    "人工智能",
+    "互联网",
+    "新能源",
+    "医药",
+    "消费",
+    "金融",
+    "军工",
+    "红利",
+    "油气",
+    "黄金",
+    "债券",
+    "科技",
+)
+
+COARSE_THEME_SUPPRESSIONS: dict[str, set[str]] = {
+    "科技": {"CPO/通信", "半导体设备", "芯片设计", "半导体材料", "半导体", "人工智能", "互联网"},
+}
+
 SCORE_FACTOR_LABELS: dict[str, str] = {
     "performance": "历史收益",
     "ranking": "同类表现",
@@ -334,8 +358,8 @@ class FundComparisonService:
         return "unknown", tags
 
     def _theme_similarity(self, left: CompareCandidate, right: CompareCandidate, theme_hint: str | None) -> float:
-        left_text = self._search_text(left)
-        right_text = self._search_text(right)
+        left_text = self._theme_evidence_text(left)
+        right_text = self._theme_evidence_text(right)
         left_themes = self._theme_tokens(left_text)
         right_themes = self._theme_tokens(right_text)
         if theme_hint:
@@ -365,6 +389,15 @@ class FundComparisonService:
     @staticmethod
     def _theme_tokens(text: str) -> set[str]:
         return {theme for theme, keywords in THEME_KEYWORDS.items() if any(keyword.lower() in text for keyword in keywords)}
+
+    @staticmethod
+    def _display_theme_tokens(tokens: set[str]) -> list[str]:
+        visible = set(tokens)
+        for coarse, fine_tokens in COARSE_THEME_SUPPRESSIONS.items():
+            if visible & fine_tokens:
+                visible.discard(coarse)
+        order = {theme: index for index, theme in enumerate(THEME_DISPLAY_ORDER)}
+        return sorted(visible, key=lambda theme: (order.get(theme, len(order)), theme))
 
     @staticmethod
     def _hint_theme_tokens(theme_hint: str | None) -> set[str]:
@@ -398,10 +431,11 @@ class FundComparisonService:
         exposures: list[CompareThemeExposure] = []
         for candidate in candidates:
             text = self._theme_evidence_text(candidate)
-            inferred = sorted(self._theme_tokens(text))
+            raw_inferred = self._theme_tokens(text)
+            inferred = self._display_theme_tokens(raw_inferred)
             direct = bool(hint and hint_lower in text)
-            token_match = bool(hint_tokens and (set(inferred) & hint_tokens))
-            partial_match = bool(hint_tokens and (set(inferred) & related_tokens))
+            token_match = bool(hint_tokens and (raw_inferred & hint_tokens))
+            partial_match = bool(hint_tokens and (raw_inferred & related_tokens))
             if not hint:
                 match_level = "unknown"
                 matches_hint = False
