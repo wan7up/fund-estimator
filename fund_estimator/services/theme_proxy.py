@@ -53,10 +53,11 @@ class ThemeProxyCandidate:
     theme: str
     proxy_code: str
     keywords: tuple[str, ...]
+    min_score: int = 3
 
 
 THEME_PROXY_CANDIDATES: tuple[ThemeProxyCandidate, ...] = (
-    ThemeProxyCandidate("CPO/通信", "515880", THEME_KEYWORDS["CPO/通信"]),
+    ThemeProxyCandidate("CPO/通信", "515880", THEME_KEYWORDS["CPO/通信"], min_score=2),
     ThemeProxyCandidate("半导体", "512480", THEME_KEYWORDS["半导体"]),
     ThemeProxyCandidate("人工智能", "159819", THEME_KEYWORDS["人工智能"]),
     ThemeProxyCandidate("互联网", "513050", THEME_KEYWORDS["互联网"]),
@@ -88,8 +89,35 @@ def infer_theme_tokens(text: str) -> set[str]:
 
 
 def infer_theme_proxy(profile: FundProfile, holdings: FundHoldings | None = None) -> ThemeProxyCandidate | None:
-    text = theme_evidence_text(profile, holdings)
+    name_text = f"{profile.name} {profile.fund_type or ''}".lower()
+    holdings_text = ""
+    if holdings is not None:
+        holdings_text = " ".join(item.stock_name for item in holdings.items if item.stock_name).lower()
+
+    best: tuple[int, int, ThemeProxyCandidate] | None = None
     for candidate in THEME_PROXY_CANDIDATES:
-        if any(keyword.lower() in text for keyword in candidate.keywords):
-            return candidate
-    return None
+        score = _theme_proxy_score(candidate, name_text=name_text, holdings_text=holdings_text)
+        if score < candidate.min_score:
+            continue
+        # Earlier candidates are more specific when scores tie.
+        rank = -THEME_PROXY_CANDIDATES.index(candidate)
+        current = (score, rank, candidate)
+        if best is None or current > best:
+            best = current
+    return best[2] if best is not None else None
+
+
+def _theme_proxy_score(candidate: ThemeProxyCandidate, *, name_text: str, holdings_text: str) -> int:
+    score = 0
+    matched_keywords: set[str] = set()
+    for keyword in candidate.keywords:
+        lowered = keyword.lower()
+        if lowered in name_text:
+            score += 3
+            matched_keywords.add(lowered)
+        if holdings_text and lowered in holdings_text:
+            score += 1
+            matched_keywords.add(lowered)
+    if len(matched_keywords) >= 3:
+        score += 1
+    return score

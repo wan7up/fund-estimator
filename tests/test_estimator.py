@@ -217,6 +217,23 @@ def test_enhanced_estimate_uses_theme_proxy_for_residual_stock_position(tmp_path
     assert result.estimated_change_pct == 1.35
 
 
+def test_enhanced_estimate_is_skipped_when_theme_evidence_is_weak(tmp_path):
+    service = FundEstimatorService(
+        fund_source=ThemedFundSource(),
+        holdings_source=FakeHoldingsSource(),
+        quote_source=FakeQuoteSource(),
+        cache=SQLiteCache(tmp_path / "weak-theme.sqlite3"),
+        allow_mock_fallback=False,
+    )
+
+    result = asyncio.run(service.estimate("123456", mode="both"))
+
+    assert result.theme_proxy is None
+    assert result.enhanced is None
+    assert result.primary_mode == "raw"
+    assert result.estimated_change_pct == 0.75
+
+
 def test_current_day_official_nav_uses_official_state(tmp_path):
     service = FundEstimatorService(
         fund_source=OfficialNavFundSource(),
