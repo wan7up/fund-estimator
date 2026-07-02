@@ -388,6 +388,63 @@ def test_non_qdii_official_discount_waits_for_cross_day_confirmation(tmp_path):
     assert '非QDII官方信号，等待跨日确认' not in neutral.risks
 
 
+def test_shanghai_lof_discount_is_actionable_without_cross_day_confirmation(tmp_path):
+    service = make_service(tmp_path)
+    now = datetime(2026, 7, 2, 6, 30, tzinfo=UTC)
+    profile = FundProfile(
+        code="501096",
+        name="国联安科创混合(LOF)",
+        fund_type="混合型-偏股",
+        nav_date=date(2026, 7, 1),
+        last_nav=1.0,
+        previous_nav_date=date(2026, 6, 30),
+        previous_nav=1.0,
+        actual_change_pct=0.0,
+        source="mock",
+    )
+    quote = LofMarketQuote(
+        code="501096",
+        name="国联安科创LOF",
+        latest_price=0.91,
+        previous_close=1.0,
+        change_pct=-8.0,
+        turnover_yuan=20_000_000,
+        turnover_rate_pct=14.0,
+        quote_time=now,
+        market="SH",
+        source="mock",
+    )
+    status = LofTradingStatus(
+        purchase_status="暂停",
+        redemption_status="开放",
+        daily_purchase_limit_yuan=None,
+        fee_rate_pct=0.15,
+        source="mock",
+    )
+
+    item = service._build_item(
+        code="501096",
+        profile=profile,
+        quote=quote,
+        status=status,
+        haoetf_snapshot=None,
+        proxy_changes={},
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        cooldown_keys=set(),
+        signal_history={},
+        now=now,
+    )
+
+    assert item.direction == "discount"
+    assert item.official_premium_pct == -9.0
+    assert item.actionable is True
+    assert "非QDII官方折价候选，等待跨日确认" not in item.risks
+    assert "申购暂停" not in item.risks
+    assert "沪市LOF折价T日可赎回，需确认当日估算净值" in item.risks
+
+
 def test_lof_watchlist_is_device_scoped(tmp_path):
     service = make_service(tmp_path)
 
@@ -807,7 +864,7 @@ def test_lof_notice_empty_daily_summary_uses_compact_reason_template(tmp_path):
                 "2026-06-04 09:30",
                 "当前暂无可操作套利机会。",
                 "扫描池：120只",
-                "原因：无发现跨扫描日持续折价或溢价超过3%且成交额超过300万",
+                "原因：无发现沪市可赎回折价或跨扫描日持续折溢价超过3%且成交额超过300万",
             ]
         )
     ]
@@ -876,7 +933,7 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "160005" not in sent_texts[0]
     assert "160008" not in sent_texts[0]
     assert "成交额：800万；换手率：--；估算溢价：-4.50%" in sent_texts[0]
-    assert "操作建议：折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。" in sent_texts[0]
+    assert "操作建议：深市/非沪市LOF折价超过3%，成交额达标；通常需次日赎回，先核实申赎规则、费用、到账时间和次日净值波动风险。" in sent_texts[0]
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
     rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
     assert rows[0]["scan_items"] == 8
@@ -884,6 +941,61 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert rows[0]["raw_candidate_count"] == 4
     assert rows[0]["raw_candidate_codes"] == ["160006", "160002", "160001", "160007"]
     assert rows[0]["candidate_codes"] == ["160006", "160002", "160001", "160007"]
+
+
+def test_lof_notice_prioritizes_shanghai_discount_without_prior_day_signal(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+        send_empty_daily_summary=False,
+    )
+    notice = LofNoticeService(config)
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    now = datetime(2026, 7, 2, 6, 30, tzinfo=UTC)
+
+    def item(code: str, premium: float, *, purchase_status: str = "开放", redemption_status: str = "开放") -> LofPremiumItem:
+        return LofPremiumItem(
+            code=code,
+            name=f"测试LOF{code}",
+            estimated_premium_pct=None,
+            official_premium_pct=premium,
+            signal_basis="official",
+            exchange_turnover_yuan=8_000_000,
+            exchange_turnover_rate_pct=12.0,
+            purchase_status=purchase_status,
+            redemption_status=redemption_status,
+            direction="discount",
+            level="strong",
+            updated_at=now,
+        )
+
+    response = LofOpportunityResponse(
+        scanned_at=now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=[
+            item("501096", -8.8, purchase_status="暂停"),
+            item("501099", -7.2, redemption_status="暂停"),
+            item("160324", -9.5),
+        ],
+    )
+
+    result = notice.notify_afternoon_check(response, now=now)
+
+    assert result["status"] == "sent"
+    assert len(sent_texts) == 1
+    assert "501096 测试LOF501096" in sent_texts[0]
+    assert "501099" not in sent_texts[0]
+    assert "160324" not in sent_texts[0]
+    assert "操作建议：沪市LOF折价超过3%，成交额达标；可重点关注T日场内买入并当日提交赎回，务必在15:00前确认券商支持场内赎回、赎回开放、费用和T日估算净值。" in sent_texts[0]
 
 
 def test_daily_summary_schedule_skips_after_same_day_send(tmp_path):

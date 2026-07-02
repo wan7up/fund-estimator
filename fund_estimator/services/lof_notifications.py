@@ -801,7 +801,11 @@ class LofNoticeService:
         state: dict[str, Any],
         now: datetime,
     ) -> list[LofPremiumItem]:
-        return [item for item in items if self._has_prior_same_direction_signal(item, state=state, now=now)]
+        return [
+            item
+            for item in items
+            if self._is_shanghai_lof_discount(item) or self._has_prior_same_direction_signal(item, state=state, now=now)
+        ]
 
     def _has_prior_same_direction_signal(self, item: LofPremiumItem, *, state: dict[str, Any], now: datetime) -> bool:
         premium = self._notice_premium_pct(item)
@@ -866,13 +870,20 @@ class LofNoticeService:
         premium = LofNoticeService._notice_premium_pct(item)
         if premium is None or abs(premium) <= NOTICE_PREMIUM_THRESHOLD_PCT:
             return False
-        if item.purchase_status == "暂停":
+        if premium > 0 and item.purchase_status == "暂停":
+            return False
+        if premium < 0 and item.redemption_status == "暂停":
             return False
         if item.exchange_turnover_yuan is None or item.exchange_turnover_yuan <= min_turnover_yuan:
             return False
         if LofNoticeService._needs_domestic_turnover_filter(item):
             return False
         return True
+
+    @staticmethod
+    def _is_shanghai_lof_discount(item: LofPremiumItem) -> bool:
+        premium = LofNoticeService._notice_premium_pct(item)
+        return premium is not None and premium < 0 and item.code.startswith("5")
 
     @staticmethod
     def _needs_domestic_turnover_filter(item: LofPremiumItem) -> bool:
@@ -890,9 +901,14 @@ class LofNoticeService:
         return item.estimated_premium_pct if item.estimated_premium_pct is not None else item.official_premium_pct
 
     @staticmethod
-    def _notice_sort_key(item: LofPremiumItem) -> tuple[float, float, str]:
+    def _notice_sort_key(item: LofPremiumItem) -> tuple[int, float, float, str]:
         premium = LofNoticeService._notice_premium_pct(item)
-        return (-(abs(premium) if premium is not None else -1), -(item.exchange_turnover_yuan or 0), item.code)
+        return (
+            0 if LofNoticeService._is_shanghai_lof_discount(item) else 1,
+            -(abs(premium) if premium is not None else -1),
+            -(item.exchange_turnover_yuan or 0),
+            item.code,
+        )
 
     def _send_candidate(
         self,
@@ -1025,7 +1041,7 @@ class LofNoticeService:
                     local_now.strftime('%Y-%m-%d %H:%M'),
                     "当前暂无可操作套利机会。",
                     f"扫描池：{len(response.items)}只",
-                    f"原因：无发现跨扫描日持续折价或溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%且成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}",
+                    f"原因：无发现沪市可赎回折价或跨扫描日持续折溢价超过{NOTICE_PREMIUM_THRESHOLD_PCT:.0f}%且成交额超过{LofNoticeService._format_money(response.min_turnover_yuan)}",
                 ]
             )
         return LofNoticeService._format_alert(items[:10], now=now, min_turnover_yuan=response.min_turnover_yuan)
@@ -1076,16 +1092,20 @@ class LofNoticeService:
         premium = LofNoticeService._notice_premium_pct(item)
         if premium is None or abs(premium) <= NOTICE_PREMIUM_THRESHOLD_PCT:
             return "当前折溢价未超过提醒阈值，建议仅观察。"
-        if item.purchase_status == "暂停":
+        if premium > 0 and item.purchase_status == "暂停":
             return "折溢价超过3%，但申购暂停，暂不进入套利提醒。"
         if item.exchange_turnover_yuan is None:
             return "折溢价超过3%，但成交额未知，先核实流动性和申购状态。"
         if item.exchange_turnover_yuan <= min_turnover_yuan:
             return f"折溢价超过3%，但成交额未超过{LofNoticeService._format_money(min_turnover_yuan)}，建议仅观察或小额验证。"
         if premium < 0:
+            if item.redemption_status == "暂停":
+                return "折价超过3%，但赎回暂停，暂不进入折价套利提醒。"
+            if LofNoticeService._is_shanghai_lof_discount(item):
+                return "沪市LOF折价超过3%，成交额达标；可重点关注T日场内买入并当日提交赎回，务必在15:00前确认券商支持场内赎回、赎回开放、费用和T日估算净值。"
             if item.purchase_status == "unknown":
                 return "折价超过3%，成交额达标；申购状态未明确暂停，先核实申赎规则和费用。"
-            return "折价超过3%，成交额达标；先核实申赎规则、费用和到账时间，再评估场内买入相关操作。"
+            return "深市/非沪市LOF折价超过3%，成交额达标；通常需次日赎回，先核实申赎规则、费用、到账时间和次日净值波动风险。"
         if item.purchase_status == "unknown":
             return "溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。"
         if item.purchase_status == "限制大额":

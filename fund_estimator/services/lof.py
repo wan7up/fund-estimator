@@ -1281,12 +1281,18 @@ class LofMonitorService:
     ) -> bool:
         if signal_basis != "official" or is_qdii:
             return False
+        if LofMonitorService._is_shanghai_lof_discount(code=code, direction=direction):
+            return False
         return not LofMonitorService._has_prior_same_direction_signal(
             code=code,
             direction=direction,
             signal_history=signal_history,
             now=now,
         )
+
+    @staticmethod
+    def _is_shanghai_lof_discount(*, code: str, direction: str) -> bool:
+        return direction == "discount" and code.startswith("5")
 
     @staticmethod
     def _has_prior_same_direction_signal(
@@ -1363,10 +1369,12 @@ class LofMonitorService:
             risks.append("净值过期缓存")
         if "QDII" in (profile.fund_type or "").upper() or CORE_LOF_BY_CODE.get(code) is not None:
             risks.append("QDII/跨市场时间差")
-        if status.purchase_status in {"暂停", "限制大额"}:
+        if direction == "premium" and status.purchase_status in {"暂停", "限制大额"}:
             risks.append(f"申购{status.purchase_status}")
         if status.redemption_status == "暂停":
             risks.append("赎回暂停")
+        if self._is_shanghai_lof_discount(code=code, direction=direction):
+            risks.append("沪市LOF折价T日可赎回，需确认当日估算净值")
         if needs_domestic_turnover_confirmation:
             if quote is None or quote.turnover_rate_pct is None:
                 risks.append("换手率未知")
