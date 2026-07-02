@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime, timedelta
 
+import httpx
+
 from fund_estimator.data_sources.sina import parse_sina_lof_quotes
 from fund_estimator.models.lof import LofMarketQuote, LofOpportunityResponse, LofPremiumItem, LofTradingStatus
 from fund_estimator.models.schema import FundProfile, FundSearchResult
@@ -14,6 +16,7 @@ from fund_estimator.services.lof import (
     EastmoneyLofTradingStatusDataSource,
     LatestFundNav,
     LofMonitorService,
+    YahooProxyDataSource,
 )
 from fund_estimator.services.lof_config import CORE_LOF_BY_CODE
 from fund_estimator.services.lof_notice_scheduler import LofDailyNoticeScheduler
@@ -207,6 +210,38 @@ def test_eastmoney_lof_quote_uses_previous_close_when_latest_missing_preopen():
     assert quote.latest_price == 2.386
     assert quote.previous_close == 2.386
     assert quote.change_pct is None
+
+
+def test_domestic_proxy_fetch_failure_does_not_abort_scan():
+    source = YahooProxyDataSource()
+
+    async def fail(*args, **kwargs):
+        raise httpx.ConnectError("temporary gateway failure")
+
+    source._get_sina_changes = fail
+
+    result = __import__("asyncio").run(source.get_changes(["SINA:sh588000"]))
+
+    assert result == {}
+
+
+def test_sina_domestic_proxy_change_parser():
+    source = YahooProxyDataSource()
+    response = httpx.Response(
+        200,
+        request=httpx.Request("GET", "https://hq.sinajs.cn/list=sh588000"),
+        content='var hq_str_sh588000="科创50ETF华夏,2.220,2.200,2.244,2.250,2.100,2.243,2.244,1,1.000,2026-07-02,15:00:00,00,";'.encode(
+            "gbk"
+        ),
+    )
+
+    class Client:
+        async def get(self, *args, **kwargs):
+            return response
+
+    result = __import__("asyncio").run(source._get_sina_changes(Client(), ["SINA:sh588000"]))
+
+    assert round(result["SINA:sh588000"], 6) == 2.0
 
 
 def test_lof_scan_deep_profiles_full_discovery_when_preopen_turnover_missing():
@@ -428,7 +463,7 @@ def test_shanghai_lof_discount_is_actionable_without_cross_day_confirmation(tmp_
         quote=quote,
         status=status,
         haoetf_snapshot=None,
-        proxy_changes={},
+        proxy_changes={("SINA:sh588000", "2026-07-01"): 1.0},
         normal_threshold_pct=2.0,
         strong_threshold_pct=5.0,
         min_turnover_yuan=3_000_000,
@@ -438,6 +473,8 @@ def test_shanghai_lof_discount_is_actionable_without_cross_day_confirmation(tmp_
     )
 
     assert item.direction == "discount"
+    assert item.estimated_nav == 1.01
+    assert item.estimated_premium_pct == -9.901
     assert item.official_premium_pct == -9.0
     assert item.actionable is True
     assert "非QDII官方折价候选，等待跨日确认" not in item.risks
@@ -863,8 +900,8 @@ def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     assert "161128" in sent_texts[0]
     assert "操作建议：" in sent_texts[0]
     assert "成交额：" in sent_texts[0]
-    assert "估算溢价：" in sent_texts[0]
-    assert "官方净值溢价：" in sent_texts[0]
+    assert "估算折溢价：" in sent_texts[0]
+    assert "官方净值折溢价：" in sent_texts[0]
     assert "申购限额" in sent_texts[0]
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
     assert state["last_daily_summary_date"] == "2026-05-29"
@@ -988,7 +1025,7 @@ def test_lof_notice_filters_abs_premium_by_purchase_status_and_turnover(tmp_path
     assert "160004" not in sent_texts[0]
     assert "160005" not in sent_texts[0]
     assert "160008" not in sent_texts[0]
-    assert "成交额：800万；换手率：--；估算溢价：-4.50%" in sent_texts[0]
+    assert "成交额：800万；换手率：--；估算折溢价：-4.50%" in sent_texts[0]
     assert "操作建议：深市/非沪市LOF折价超过3%，成交额达标；通常需次日赎回，先核实申赎规则、费用、到账时间和次日净值波动风险。" in sent_texts[0]
     assert "操作建议：溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。" in sent_texts[0]
     rows = [json.loads(line) for line in config.ledger_path.read_text(encoding="utf-8").splitlines()]
@@ -1366,8 +1403,9 @@ def test_lof_notice_test_uses_alert_template(tmp_path):
                 "2026-06-03 10:04",
                 "501312 [QDII] 核心LOF501312",
                 "操作建议：当前折溢价未超过提醒阈值，建议仅观察。",
-                "成交额：10万；换手率：--；估算溢价：+0.00%",
-                "官方净值溢价：+1.00%；申购限额1万",
+                "成交额：10万；换手率：--；估算折溢价：+0.00%",
+                "T日估算净值：1.0100；官方净值折溢价：+1.00%",
+                "赎回开放；费率--；申购限额1万",
             ]
         )
     ]

@@ -30,6 +30,7 @@ from fund_estimator.services.lof_config import (
     CORE_CROSS_BORDER_LOFS,
     CORE_LOF_BY_CODE,
     CoreLof,
+    infer_domestic_lof_proxy,
     looks_like_lof_code,
     looks_like_lof_fund,
     looks_like_lof_name,
@@ -386,19 +387,86 @@ class YahooProxyDataSource:
             return {}
         headers = {"User-Agent": "Mozilla/5.0 fund-estimator/0.1"}
         async with httpx.AsyncClient(timeout=self.timeout, headers=headers, trust_env=http_trust_env()) as client:
+            eastmoney_symbols = [symbol for symbol in unique_symbols if symbol.startswith("EM:")]
+            eastmoney_rows: dict[str, float] = {}
+            if eastmoney_symbols:
+                try:
+                    eastmoney_rows = await self._get_eastmoney_changes(client, eastmoney_symbols)
+                except httpx.HTTPError:
+                    eastmoney_rows = {}
+            sina_symbols = [symbol for symbol in unique_symbols if symbol.startswith("SINA:")]
+            sina_rows: dict[str, float] = {}
+            if sina_symbols:
+                try:
+                    sina_rows = await self._get_sina_changes(client, sina_symbols)
+                except httpx.HTTPError:
+                    sina_rows = {}
+            yahoo_symbols = [
+                symbol for symbol in unique_symbols if not symbol.startswith("EM:") and not symbol.startswith("SINA:")
+            ]
             rows = await asyncio.gather(
-                *(self._get_chart_change(client, symbol, base_date=base_date) for symbol in unique_symbols),
+                *(self._get_chart_change(client, symbol, base_date=base_date) for symbol in yahoo_symbols),
                 return_exceptions=True,
             )
-        result: dict[str, float] = {}
+        result: dict[str, float] = {**eastmoney_rows, **sina_rows}
         errors: list[str] = []
-        for symbol, row in zip(unique_symbols, rows, strict=False):
+        for symbol, row in zip(yahoo_symbols, rows, strict=False):
             if isinstance(row, Exception):
                 errors.append(f"{symbol}: {row}")
             elif row is not None:
                 result[symbol] = row
         if not result and errors:
             raise DataSourceError("PROXY_QUOTE_FETCH_FAILED", "海外代理行情获取失败", details={"errors": errors[:5]})
+        return result
+
+    async def _get_sina_changes(self, client: httpx.AsyncClient, symbols: list[str]) -> dict[str, float]:
+        sina_codes = [symbol.removeprefix("SINA:") for symbol in symbols]
+        if not sina_codes:
+            return {}
+        response = await client.get(
+            "https://hq.sinajs.cn/list=" + ",".join(sina_codes),
+            headers={"User-Agent": "Mozilla/5.0 fund-estimator/0.1", "Referer": "https://finance.sina.com.cn/"},
+        )
+        response.raise_for_status()
+        text = response.content.decode("gbk", errors="replace")
+        result: dict[str, float] = {}
+        for match in re.finditer(r'var hq_str_(?P<code>[a-z]{2}\d{6})="(?P<body>[^"]*)";', text):
+            fields = match.group("body").split(",")
+            if len(fields) < 4:
+                continue
+            previous_close = _parse_float(fields[2])
+            latest_price = _parse_float(fields[3])
+            if previous_close and latest_price is not None:
+                result[f"SINA:{match.group('code')}"] = (latest_price / previous_close - 1) * 100
+        return result
+
+    async def _get_eastmoney_changes(self, client: httpx.AsyncClient, symbols: list[str]) -> dict[str, float]:
+        secids = [symbol.removeprefix("EM:") for symbol in symbols]
+        if not secids:
+            return {}
+        response = await client.get(
+            "https://push2.eastmoney.com/api/qt/ulist.np/get",
+            params={
+                "fltt": "2",
+                "invt": "2",
+                "fields": "f3,f12",
+                "secids": ",".join(secids),
+                "_": str(int(time.time() * 1000)),
+            },
+            headers={**DEFAULT_HEADERS, "Referer": "https://quote.eastmoney.com/"},
+        )
+        response.raise_for_status()
+        rows = ((response.json().get("data") or {}).get("diff") or [])
+        if isinstance(rows, dict):
+            rows = list(rows.values())
+        result: dict[str, float] = {}
+        secid_by_code = {secid.split(".", 1)[-1]: secid for secid in secids}
+        for row in rows:
+            code = str(row.get("f12") or "")
+            change_pct = _parse_float(row.get("f3"))
+            secid = secid_by_code.get(code)
+            if secid and change_pct is not None:
+                result[f"EM:{secid}"] = change_pct
         return result
 
     async def _get_chart_change(self, client: httpx.AsyncClient, symbol: str, *, base_date: date | None = None) -> float | None:
@@ -1018,7 +1086,10 @@ class LofMonitorService:
     ) -> dict[tuple[str, str], float]:
         symbols_by_period: dict[str, set[str]] = {}
         for code in codes:
-            config = CORE_LOF_BY_CODE.get(code, CoreLof(code, "", ()))
+            profile = profiles.get(code)
+            config = CORE_LOF_BY_CODE.get(code) or (
+                infer_domestic_lof_proxy(profile.name, profile.fund_type) if profile is not None else None
+            ) or CoreLof(code, "", ())
             if not config.proxies:
                 continue
             period_key = self._reference_period_start(profiles.get(code)) or "latest"
@@ -1116,6 +1187,8 @@ class LofMonitorService:
         now: datetime,
     ) -> LofPremiumItem:
         config = CORE_LOF_BY_CODE.get(code)
+        domestic_proxy = None if config is not None else infer_domestic_lof_proxy(profile.name, profile.fund_type)
+        proxy_config = config or domestic_proxy
         proxy_moves: list[LofProxyMove] = []
         weighted_proxy_change = 0.0
         used_weight = 0.0
@@ -1123,8 +1196,8 @@ class LofMonitorService:
         reference_period_key = reference_period_start or "latest"
         reference_period_end = now.date().isoformat()
         reference_basis = "official_nav_period" if reference_period_start else "latest_daily"
-        if config is not None:
-            for leg in config.proxies:
+        if proxy_config is not None:
+            for leg in proxy_config.proxies:
                 change_pct = proxy_changes.get((leg.symbol, reference_period_key))
                 proxy_moves.append(
                     LofProxyMove(
@@ -1135,7 +1208,15 @@ class LofMonitorService:
                         period_start=reference_period_start,
                         period_end=reference_period_end,
                         change_basis=reference_basis,
-                        source="yfinance" if change_pct is not None else "unknown",
+                        source=(
+                            "eastmoney_proxy"
+                            if leg.symbol.startswith("EM:") and change_pct is not None
+                            else "sina_proxy"
+                            if leg.symbol.startswith("SINA:") and change_pct is not None
+                            else "yfinance"
+                            if change_pct is not None
+                            else "unknown"
+                        ),
                         warning=None if change_pct is not None else "代理行情缺失",
                     )
                 )
@@ -1234,7 +1315,7 @@ class LofMonitorService:
             code=profile.code,
             name=profile.name,
             fund_type=profile.fund_type,
-            theme=config.theme if config else None,
+            theme=config.theme if config else domestic_proxy.theme if domestic_proxy else None,
             is_qdii=is_qdii,
             official_nav=profile.last_nav,
             official_nav_date=profile.nav_date.isoformat() if profile.nav_date else None,

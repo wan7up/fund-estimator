@@ -1070,8 +1070,9 @@ class LofNoticeService:
                 [
                     LofNoticeService._format_item_title(item),
                     f"操作建议：{LofNoticeService._action_advice(item, min_turnover_yuan=min_turnover_yuan)}",
-                    f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；换手率：{LofNoticeService._format_pct(item.exchange_turnover_rate_pct)}；估算溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
-                    f"官方净值溢价：{LofNoticeService._format_pct(item.official_premium_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
+                    f"成交额：{LofNoticeService._format_money(item.exchange_turnover_yuan)}；换手率：{LofNoticeService._format_pct(item.exchange_turnover_rate_pct)}；估算折溢价：{LofNoticeService._format_pct(item.estimated_premium_pct)}",
+                    f"T日估算净值：{LofNoticeService._format_nav(item.estimated_nav)}；官方净值折溢价：{LofNoticeService._format_pct(item.official_premium_pct)}",
+                    f"赎回{item.redemption_status}；费率{LofNoticeService._format_fee(item.fee_rate_pct)}；申购限额{LofNoticeService._format_limit(item.daily_purchase_limit_yuan)}",
                 ]
             )
         return "\n".join(lines)
@@ -1090,8 +1091,9 @@ class LofNoticeService:
                 local_now.strftime('%Y-%m-%d %H:%M'),
                 "501312 [QDII] 华宝海外科技股票(QDII-LOF)A",
                 "操作建议：测试通知，当前未取得基金实时数据，仅用于验证飞书连接。",
-                "成交额：--；换手率：--；估算溢价：--",
-                "官方净值溢价：--；申购限额--",
+                "成交额：--；换手率：--；估算折溢价：--",
+                "T日估算净值：--；官方净值折溢价：--",
+                "赎回unknown；费率--；申购限额--",
             ]
         )
 
@@ -1145,6 +1147,18 @@ class LofNoticeService:
         if value is None:
             return "--"
         return LofNoticeService._format_money(value)
+
+    @staticmethod
+    def _format_fee(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:.2f}%"
+
+    @staticmethod
+    def _format_nav(value: float | None) -> str:
+        if value is None:
+            return "--"
+        return f"{value:.4f}"
 
     @staticmethod
     def _format_price(value: float | None) -> str:

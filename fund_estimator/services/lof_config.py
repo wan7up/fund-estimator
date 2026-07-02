@@ -46,6 +46,36 @@ CORE_CROSS_BORDER_LOFS: tuple[CoreLof, ...] = (
 
 CORE_LOF_BY_CODE = {item.code: item for item in CORE_CROSS_BORDER_LOFS}
 
+DOMESTIC_LOF_PROXY_RULES: tuple[CoreLof, ...] = (
+    CoreLof("domestic-tech-board", "科创/创新主题", (ProxyLeg("SINA:sh588000", 1.0, "科创50ETF"),)),
+    CoreLof("domestic-securities", "证券公司", (ProxyLeg("SINA:sh512880", 1.0, "证券ETF"),)),
+    CoreLof("domestic-ai", "人工智能", (ProxyLeg("SINA:sz159819", 1.0, "人工智能ETF"),)),
+    CoreLof("domestic-nonferrous", "有色金属", (ProxyLeg("SINA:sh512400", 1.0, "有色金属ETF"),)),
+    CoreLof("domestic-baijiu", "白酒", (ProxyLeg("SINA:sh512690", 1.0, "酒ETF"),)),
+    CoreLof("domestic-military", "军工", (ProxyLeg("SINA:sh512660", 1.0, "军工ETF"),)),
+)
+
+DOMESTIC_LOF_PROXY_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("科创", "科技创新", "创新未来", "新兴产业", "科技创新股票"), "domestic-tech-board"),
+    (("证券", "券商"), "domestic-securities"),
+    (("人工智能", "AI"), "domestic-ai"),
+    (("有色", "有色金属"), "domestic-nonferrous"),
+    (("白酒", "酒"), "domestic-baijiu"),
+    (("军工",), "domestic-military"),
+)
+
+DOMESTIC_LOF_PROXY_BY_RULE = {item.code: item for item in DOMESTIC_LOF_PROXY_RULES}
+
+
+def infer_domestic_lof_proxy(name: str | None, fund_type: str | None = None) -> CoreLof | None:
+    text = f"{name or ''} {fund_type or ''}".upper()
+    if "QDII" in text:
+        return None
+    for keywords, rule_code in DOMESTIC_LOF_PROXY_KEYWORDS:
+        if any(keyword.upper() in text for keyword in keywords):
+            return DOMESTIC_LOF_PROXY_BY_RULE.get(rule_code)
+    return None
+
 LOF_CODE_PREFIXES = ("16", "501", "502", "503", "505", "506")
 CLOSED_FUND_KEYWORDS = ("定开", "封闭", "封闭式", "持有期", "战略配售")
 
