@@ -46,6 +46,7 @@ DEFAULT_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_MIN_DOMESTIC_TURNOVER_RATE_PCT = 10.0
 DEFAULT_NORMAL_THRESHOLD_PCT = 2.0
 DEFAULT_STRONG_THRESHOLD_PCT = 5.0
+DEFAULT_HIGH_SINGLE_DAY_SIGNAL_PCT = 8.0
 DISCOVERY_MAX_CODES = 500
 DISCOVERY_DEEP_PROFILE_MAX_CODES = 80
 DISCOVERY_PREOPEN_DEEP_PROFILE_MAX_CODES = 120
@@ -1186,6 +1187,7 @@ class LofMonitorService:
             is_opportunity
             and self._needs_cross_day_confirmation(
                 code=code,
+                signal_value=signal_value,
                 signal_basis=signal_basis,
                 direction=direction,
                 is_qdii=is_qdii,
@@ -1215,6 +1217,7 @@ class LofMonitorService:
             cooldown_keys=cooldown_keys,
             needs_cross_day_confirmation=needs_cross_day_confirmation,
             needs_domestic_turnover_confirmation=needs_domestic_turnover_confirmation,
+            is_high_single_day_signal=self._is_high_single_day_signal(signal_value),
         )
         actionable = bool(
             is_opportunity
@@ -1273,6 +1276,7 @@ class LofMonitorService:
     def _needs_cross_day_confirmation(
         *,
         code: str,
+        signal_value: float | None,
         signal_basis: str,
         direction: str,
         is_qdii: bool,
@@ -1282,6 +1286,8 @@ class LofMonitorService:
         if signal_basis != "official" or is_qdii:
             return False
         if LofMonitorService._is_shanghai_lof_discount(code=code, direction=direction):
+            return False
+        if LofMonitorService._is_high_single_day_signal(signal_value):
             return False
         return not LofMonitorService._has_prior_same_direction_signal(
             code=code,
@@ -1293,6 +1299,10 @@ class LofMonitorService:
     @staticmethod
     def _is_shanghai_lof_discount(*, code: str, direction: str) -> bool:
         return direction == "discount" and code.startswith("5")
+
+    @staticmethod
+    def _is_high_single_day_signal(signal_value: float | None) -> bool:
+        return signal_value is not None and abs(signal_value) >= DEFAULT_HIGH_SINGLE_DAY_SIGNAL_PCT
 
     @staticmethod
     def _has_prior_same_direction_signal(
@@ -1355,6 +1365,7 @@ class LofMonitorService:
         cooldown_keys: set[str],
         needs_cross_day_confirmation: bool = False,
         needs_domestic_turnover_confirmation: bool = False,
+        is_high_single_day_signal: bool = False,
     ) -> list[str]:
         risks: list[str] = []
         if exchange_price is None:
@@ -1375,6 +1386,8 @@ class LofMonitorService:
             risks.append("赎回暂停")
         if self._is_shanghai_lof_discount(code=code, direction=direction):
             risks.append("沪市LOF折价T日可赎回，需确认当日估算净值")
+        elif is_high_single_day_signal and direction in {"premium", "discount"}:
+            risks.append("单日高折溢价信号，需确认当日估算净值")
         if needs_domestic_turnover_confirmation:
             if quote is None or quote.turnover_rate_pct is None:
                 risks.append("换手率未知")

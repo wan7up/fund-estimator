@@ -21,6 +21,7 @@ MARKET_TZ = ZoneInfo("Asia/Shanghai")
 COOLDOWN_SECONDS = 30 * 60
 SUMMARY_INTERVAL_SECONDS = 10 * 60
 NOTICE_PREMIUM_THRESHOLD_PCT = 3.0
+NOTICE_HIGH_SINGLE_DAY_SIGNAL_PCT = 8.0
 DEFAULT_NOTICE_MIN_TURNOVER_YUAN = 3_000_000
 DEFAULT_NOTICE_MIN_DOMESTIC_TURNOVER_RATE_PCT = 10.0
 SIGNAL_HISTORY_LOOKBACK_DAYS = 10
@@ -804,7 +805,9 @@ class LofNoticeService:
         return [
             item
             for item in items
-            if self._is_shanghai_lof_discount(item) or self._has_prior_same_direction_signal(item, state=state, now=now)
+            if self._is_shanghai_lof_discount(item)
+            or self._is_high_single_day_signal(item)
+            or self._has_prior_same_direction_signal(item, state=state, now=now)
         ]
 
     def _has_prior_same_direction_signal(self, item: LofPremiumItem, *, state: dict[str, Any], now: datetime) -> bool:
@@ -886,6 +889,11 @@ class LofNoticeService:
         return premium is not None and premium < 0 and item.code.startswith("5")
 
     @staticmethod
+    def _is_high_single_day_signal(item: LofPremiumItem) -> bool:
+        premium = LofNoticeService._notice_premium_pct(item)
+        return premium is not None and abs(premium) >= NOTICE_HIGH_SINGLE_DAY_SIGNAL_PCT
+
+    @staticmethod
     def _needs_domestic_turnover_filter(item: LofPremiumItem) -> bool:
         return (
             item.signal_basis == "official"
@@ -904,7 +912,7 @@ class LofNoticeService:
     def _notice_sort_key(item: LofPremiumItem) -> tuple[int, float, float, str]:
         premium = LofNoticeService._notice_premium_pct(item)
         return (
-            0 if LofNoticeService._is_shanghai_lof_discount(item) else 1,
+            0 if LofNoticeService._is_shanghai_lof_discount(item) else 1 if LofNoticeService._is_high_single_day_signal(item) else 2,
             -(abs(premium) if premium is not None else -1),
             -(item.exchange_turnover_yuan or 0),
             item.code,
@@ -1103,9 +1111,13 @@ class LofNoticeService:
                 return "折价超过3%，但赎回暂停，暂不进入折价套利提醒。"
             if LofNoticeService._is_shanghai_lof_discount(item):
                 return "沪市LOF折价超过3%，成交额达标；可重点关注T日场内买入并当日提交赎回，务必在15:00前确认券商支持场内赎回、赎回开放、费用和T日估算净值。"
+            if abs(premium) >= NOTICE_HIGH_SINGLE_DAY_SIGNAL_PCT:
+                return "单日折价超过8%，成交额达标；可首日提醒，但非沪市通常需次日赎回，重点核实赎回开放、费用和次日净值波动风险。"
             if item.purchase_status == "unknown":
                 return "折价超过3%，成交额达标；申购状态未明确暂停，先核实申赎规则和费用。"
             return "深市/非沪市LOF折价超过3%，成交额达标；通常需次日赎回，先核实申赎规则、费用、到账时间和次日净值波动风险。"
+        if abs(premium) >= NOTICE_HIGH_SINGLE_DAY_SIGNAL_PCT:
+            return "单日溢价超过8%，成交额达标；可首日提醒，但申购套利仍有转场内时间差，优先确认申购开放、限额、费用和溢价持续性。"
         if item.purchase_status == "unknown":
             return "溢价超过3%，成交额达标；申购状态未明确暂停，先核实开放和限额。"
         if item.purchase_status == "限制大额":
