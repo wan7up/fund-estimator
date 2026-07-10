@@ -26,6 +26,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
         "fund_estimator/web/shell.css",
         "fund_estimator/web/manifest.webmanifest",
         "scripts/check_session_scope.py",
+        "scripts/run_linux.sh",
         "tests/test_api.py",
     ),
     "estimate": (
@@ -90,6 +91,7 @@ PROTECTED_BY_ORCHESTRATOR = (
     "fund_estimator/web/shell.css",
     "fund_estimator/web/manifest.webmanifest",
     "scripts/check_session_scope.py",
+    "scripts/run_linux.sh",
 )
 
 

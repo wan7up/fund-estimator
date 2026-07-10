@@ -7,4 +7,10 @@ export FUND_ESTIMATOR_FORCE_MOCK="${FUND_ESTIMATOR_FORCE_MOCK:-0}"
 export FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK="${FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK:-0}"
 export FUND_ESTIMATOR_DB="${FUND_ESTIMATOR_DB:-data/fund_estimator.sqlite3}"
 
-exec python -m uvicorn fund_estimator.api.app:app --host 0.0.0.0 --port "${PORT:-8000}"
+if [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="${PYTHON_BIN:-python3}"
+fi
+
+exec "$PYTHON_BIN" -m uvicorn fund_estimator.api.app:app --host 0.0.0.0 --port "${PORT:-8000}"

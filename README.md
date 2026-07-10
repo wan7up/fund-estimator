@@ -33,10 +33,12 @@
 
 ## 快速启动
 
-```powershell
-& 'C:\Users\Administrator\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn fund_estimator.api.app:app --reload --host 127.0.0.1 --port 8000
+macOS / Linux：
+
+```bash
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python -m uvicorn fund_estimator.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 打开 `http://127.0.0.1:8000`。
@@ -53,15 +55,14 @@ docker compose -f docker-compose.quickstart.yml up -d --build
 
 默认启动会连接真实东方财富/天天基金数据源。离线演示可强制使用内置 mock 数据：
 
-```powershell
-$env:FUND_ESTIMATOR_FORCE_MOCK = '1'
-.\.venv\Scripts\python.exe -m uvicorn fund_estimator.api.app:app --reload --host 127.0.0.1 --port 8000
+```bash
+FUND_ESTIMATOR_FORCE_MOCK=1 ./.venv/bin/python -m uvicorn fund_estimator.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 如果真实数据源请求失败，接口会返回明确错误。只有显式开启下面这个变量时，真实源失败才会回退到 mock：
 
-```powershell
-$env:FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK = '1'
+```bash
+FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK=1 ./.venv/bin/python -m uvicorn fund_estimator.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 ## API
@@ -326,8 +327,8 @@ Nginx 反代示例在 `deploy/nginx/fund-estimator.conf`。生产环境建议配
 
 ## 测试
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest
+```bash
+./.venv/bin/python -m pytest
 ```
 
 测试使用 fake/mock 数据，不依赖外部网络。
