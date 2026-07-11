@@ -1299,6 +1299,10 @@ class LofMonitorService:
             needs_cross_day_confirmation=needs_cross_day_confirmation,
             needs_domestic_turnover_confirmation=needs_domestic_turnover_confirmation,
             is_high_single_day_signal=self._is_high_single_day_signal(signal_value),
+            estimated_nav=estimated_nav,
+        )
+        needs_tday_nav_for_shanghai_discount = bool(
+            self._is_shanghai_lof_discount(code=code, direction=direction) and estimated_nav is None
         )
         actionable = bool(
             is_opportunity
@@ -1308,6 +1312,7 @@ class LofMonitorService:
             and "代理行情缺失" not in risks
             and not needs_cross_day_confirmation
             and not needs_domestic_turnover_confirmation
+            and not needs_tday_nav_for_shanghai_discount
             and not (direction == "premium" and status.purchase_status == "暂停")
             and "通知冷却中" not in risks
         )
@@ -1447,6 +1452,7 @@ class LofMonitorService:
         needs_cross_day_confirmation: bool = False,
         needs_domestic_turnover_confirmation: bool = False,
         is_high_single_day_signal: bool = False,
+        estimated_nav: float | None = None,
     ) -> list[str]:
         risks: list[str] = []
         if exchange_price is None:
@@ -1466,7 +1472,10 @@ class LofMonitorService:
         if status.redemption_status == "暂停":
             risks.append("赎回暂停")
         if self._is_shanghai_lof_discount(code=code, direction=direction):
-            risks.append("沪市LOF折价T日可赎回，需确认当日估算净值")
+            if estimated_nav is None:
+                risks.append("T日估算净值缺失，沪市LOF折价不可直接操作")
+            else:
+                risks.append("沪市LOF折价T日可赎回，需确认当日估算净值")
         elif is_high_single_day_signal and direction in {"premium", "discount"}:
             risks.append("单日高折溢价信号，需确认当日估算净值")
         if needs_domestic_turnover_confirmation:

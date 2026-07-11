@@ -71,6 +71,8 @@ def infer_domestic_lof_proxy(name: str | None, fund_type: str | None = None) -> 
     text = f"{name or ''} {fund_type or ''}".upper()
     if "QDII" in text:
         return None
+    if "指数" not in text:
+        return None
     for keywords, rule_code in DOMESTIC_LOF_PROXY_KEYWORDS:
         if any(keyword.upper() in text for keyword in keywords):
             return DOMESTIC_LOF_PROXY_BY_RULE.get(rule_code)

@@ -877,6 +877,8 @@ class LofNoticeService:
             return False
         if premium < 0 and item.redemption_status == "暂停":
             return False
+        if premium < 0 and item.code.startswith("5") and item.estimated_premium_pct is None:
+            return False
         if item.exchange_turnover_yuan is None or item.exchange_turnover_yuan <= min_turnover_yuan:
             return False
         if LofNoticeService._needs_domestic_turnover_filter(item):
@@ -886,7 +888,7 @@ class LofNoticeService:
     @staticmethod
     def _is_shanghai_lof_discount(item: LofPremiumItem) -> bool:
         premium = LofNoticeService._notice_premium_pct(item)
-        return premium is not None and premium < 0 and item.code.startswith("5")
+        return premium is not None and premium < 0 and item.code.startswith("5") and item.estimated_premium_pct is not None
 
     @staticmethod
     def _is_high_single_day_signal(item: LofPremiumItem) -> bool:
