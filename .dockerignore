@@ -21,5 +21,6 @@ cloudflare.ini
 *.key
 compare_ai_config.json
 compare_ai_sessions.json
+ai_chat_sessions.json
 lof_notice_state.json
 lof_notice_ledger.jsonl

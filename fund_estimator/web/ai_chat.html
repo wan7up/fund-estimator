@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <title>基金 AI 咨询</title>
+    <link rel="stylesheet" href="/static/ai_chat.css?v=20260713a" />
+  </head>
+  <body>
+    <main class="chat-app">
+      <header class="chat-header">
+        <div>
+          <h1>基金 AI 咨询</h1>
+          <p id="statusText">正在检查咨询服务</p>
+        </div>
+        <div class="header-actions">
+          <label class="speech-toggle" title="AI 回复时自动朗读">
+            <input id="autoSpeakToggle" type="checkbox" checked />
+            <span>自动朗读</span>
+          </label>
+          <button id="stopSpeakBtn" class="icon-btn" type="button" title="停止朗读" aria-label="停止朗读">■</button>
+        </div>
+      </header>
+
+      <section id="loginPanel" class="login-panel" hidden>
+        <form id="loginForm" class="login-form">
+          <h2>验证咨询密码</h2>
+          <p>验证后可结合本设备的自选基金进行咨询。</p>
+          <label>
+            <span>咨询密码</span>
+            <input id="passwordInput" type="password" autocomplete="current-password" required />
+          </label>
+          <div id="loginError" class="form-error" hidden></div>
+          <button id="loginBtn" class="primary-btn" type="submit">进入咨询</button>
+        </form>
+      </section>
+
+      <section id="chatPanel" class="chat-panel" hidden>
+        <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+        <div id="chatError" class="chat-error" hidden></div>
+        <form id="composer" class="composer">
+          <textarea id="messageInput" rows="1" maxlength="2000" placeholder="问问你的自选基金、持仓、风格或估值"></textarea>
+          <div class="composer-actions">
+            <button id="recordBtn" class="record-btn" type="button" title="按下开始录音，再次点击结束" aria-label="语音提问">●</button>
+            <button id="replayBtn" class="secondary-btn" type="button">重播</button>
+            <button id="stopBtn" class="secondary-btn" type="button" hidden>停止</button>
+            <button id="sendBtn" class="primary-btn send-btn" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script src="/static/ai_chat.js?v=20260713a"></script>
+  </body>
+</html>

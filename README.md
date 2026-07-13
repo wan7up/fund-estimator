@@ -1,10 +1,11 @@
 # 基金工具箱
 
-基金工具箱是一个面向手机浏览器和自部署服务器的基金辅助看板。项目使用 FastAPI 提供 API 和静态页面，默认首页集成三个工具：
+基金工具箱是一个面向手机浏览器和自部署服务器的基金辅助看板。项目使用 FastAPI 提供 API 和静态页面，默认首页集成四个工具：
 
 - `实时估值`：根据国内场外公募基金披露持仓和实时行情估算盘中净值。
 - `基金对比`：对 2-4 只基金做基础画像、评分、相似度和差异点对比。
 - `套利提醒`：监控跨境 LOF/ETF 的场内溢价、折价、申购赎回状态和通知机会。
+- `AI咨询`：结合当前设备自选基金、估值摘要和公开披露数据进行基金研究问答。
 
 > **基于公开持仓和实时行情计算的估算净值，不是基金公司公布的官方净值，仅供研究和参考，不构成投资建议。**
 
@@ -16,7 +17,7 @@
 
 ## 功能
 
-- 单页工具台：`/` 默认展示实时估值，`/estimate`、`/compare`、`/arbitrage` 可直达对应标签。
+- 单页工具台：`/` 默认展示实时估值，`/estimate`、`/compare`、`/arbitrage`、`/ai-chat` 可直达对应标签。
 - 基金代码/名称搜索。
 - 按浏览器设备 ID 分组的自选基金列表，适合个人或小团队自部署使用。
 - 单基金和批量实时估值。
@@ -28,6 +29,7 @@
 - SQLite 缓存基金信息、净值、持仓和短时行情。
 - FastAPI HTTP API 与内置 Web 看板。
 - 基金对比页支持可选 AI 短评，API Key 只保存在部署实例本地数据目录。
+- AI 咨询页支持流式文字回复、浏览器中文朗读和手机录音转文字；每次提问自动读取当前设备的场外基金自选与最新可用估值摘要。
 - 套利提醒页支持可选飞书 OpenAPI 通知，飞书凭证只保存在部署实例本地数据目录。
 - 轻量 PWA：支持 iOS Safari 添加到主屏幕，提供 manifest 和自定义图标；不离线缓存实时行情。
 
@@ -97,6 +99,10 @@ FUND_ESTIMATOR_ALLOW_MOCK_FALLBACK=1 ./.venv/bin/python -m uvicorn fund_estimato
 - `PUT /api/compare/ai/config`
 - `GET /api/compare/ai/models`
 - `POST /api/compare/ai/commentary`
+- `GET /api/ai-chat/status`
+- `POST /api/ai-chat/login`
+- `POST /api/ai-chat/stream`（SSE 流式回复）
+- `POST /api/ai-chat/transcription`
 
 示例：
 
@@ -229,6 +235,18 @@ python scripts/check_theme_proxy_weekly.py --db data/fund_estimator.sqlite3 --ou
 - `LOF_NOTICE_DAILY_SUMMARY_TIME=10:00`：每日固定摘要时间，页面里的飞书通知设置会覆盖这个默认值。
 - `LOF_NOTICE_SEND_EMPTY_DAILY_SUMMARY=1`：无可操作机会时也发送一条简短确认。
 - `FUND_ESTIMATOR_COMPARE_AI_PASSWORD`：基金对比 AI 配置页管理密码；不设置时 AI 配置功能关闭。
+- `FUND_ESTIMATOR_AI_CHAT_PASSWORD`：AI 咨询访问密码；与 AI 管理密码独立，不会授予模型配置权限。
+- `FUND_ESTIMATOR_AI_TRANSCRIPTION_MODEL=whisper-1`：OpenAI 兼容语音转写模型名称；模型服务需实现 `/audio/transcriptions`。
+
+## AI 咨询配置
+
+AI 咨询复用基金对比页保存的 OpenAI 兼容模型配置，因此 API Key 始终只保存在部署实例的 `data/compare_ai_config.json`，不会传给手机浏览器。
+
+1. 在服务器 `.env` 设置 `FUND_ESTIMATOR_COMPARE_AI_PASSWORD` 和独立的 `FUND_ESTIMATOR_AI_CHAT_PASSWORD`。
+2. 部署后进入“基金对比”，使用管理密码保存模型服务 URL、API Key 和聊天模型。
+3. 进入“AI咨询”，输入咨询密码即可提问；咨询页自动读取当前浏览器设备的场外基金自选。
+
+聊天记录只保存在当前浏览器本机，不会写入服务器。录音仅上传给配置的模型服务完成转写，不会保存在本项目中。浏览器朗读使用设备自带中文语音；语音转写不可用时，页面会提示改为打字。
 
 ## 敏感信息
 

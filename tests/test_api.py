@@ -35,16 +35,19 @@ def test_shell_and_tool_page_routes(tmp_path, monkeypatch):
     arbitrage_response = client.get("/arbitrage")
     monitor_response = client.get("/monitor")
     compare_response = client.get("/compare")
+    ai_chat_response = client.get("/ai-chat")
     estimate_tool_response = client.get("/tool/estimate")
     arbitrage_tool_response = client.get("/tool/arbitrage")
     compare_tool_response = client.get("/tool/compare")
+    ai_chat_tool_response = client.get("/tool/ai-chat")
 
-    for response in [root_response, estimate_response, arbitrage_response, monitor_response, compare_response]:
+    for response in [root_response, estimate_response, arbitrage_response, monitor_response, compare_response, ai_chat_response]:
         assert response.status_code == 200
         assert "基金工具箱" in response.text
         assert 'data-src="/tool/estimate"' in response.text
         assert 'data-src="/tool/arbitrage"' in response.text
         assert 'data-src="/tool/compare"' in response.text
+        assert 'data-src="/tool/ai-chat"' in response.text
 
     assert estimate_tool_response.status_code == 200
     assert "/static/app.js" in estimate_tool_response.text
@@ -52,6 +55,8 @@ def test_shell_and_tool_page_routes(tmp_path, monkeypatch):
     assert "/static/lof_app.js" in arbitrage_tool_response.text
     assert compare_tool_response.status_code == 200
     assert "/static/compare_app.js" in compare_tool_response.text
+    assert ai_chat_tool_response.status_code == 200
+    assert "/static/ai_chat.js" in ai_chat_tool_response.text
 
 
 def test_estimate_and_watchlist(tmp_path, monkeypatch):

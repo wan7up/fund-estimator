@@ -1,7 +1,7 @@
 {
   "name": "基金工具箱",
   "short_name": "基金工具箱",
-  "description": "场外估值、套利监控和基金对比工具",
+  "description": "场外估值、基金对比、套利提醒和基金 AI 咨询工具",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -10,6 +10,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -214,6 +215,96 @@ class CompareAiService:
             commentary=content,
         )
 
+    def is_model_configured(self) -> bool:
+        config = self._read_config()
+        return bool(config.api_key and config.selected_model)
+
+    async def stream_chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.35,
+        max_tokens: int = 1_000,
+    ) -> AsyncIterator[str]:
+        """Yield text deltas from an OpenAI-compatible chat completion stream."""
+        config = self._require_config(require_model=True)
+        url = f"{config.base_url.rstrip('/')}/chat/completions"
+        payload = {
+            "model": config.selected_model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        yielded = False
+        try:
+            async with self.client_factory(
+                timeout=httpx.Timeout(connect=12.0, read=75.0, write=30.0, pool=30.0),
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                trust_env=http_trust_env(),
+            ) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    if response.status_code >= 400:
+                        raise DataSourceError(
+                            "AI_CHAT_STREAM_FAILED",
+                            f"AI 回复失败：HTTP {response.status_code}",
+                        )
+                    async for line in response.aiter_lines():
+                        text = self._stream_delta(line)
+                        if text is None:
+                            continue
+                        if text == "":
+                            break
+                        yielded = True
+                        yield text
+        except httpx.HTTPError as exc:
+            raise DataSourceError("AI_CHAT_STREAM_FAILED", "AI 回复连接失败") from exc
+        if not yielded:
+            raise DataSourceError("AI_CHAT_STREAM_EMPTY", "AI 没有返回有效回答")
+
+    async def transcribe_audio(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        model: str,
+    ) -> str:
+        config = self._require_config(require_model=False)
+        url = f"{config.base_url.rstrip('/')}/audio/transcriptions"
+        try:
+            async with self.client_factory(
+                timeout=httpx.Timeout(connect=12.0, read=90.0, write=45.0, pool=30.0),
+                headers={"Authorization": f"Bearer {config.api_key}"},
+                trust_env=http_trust_env(),
+            ) as client:
+                response = await client.post(
+                    url,
+                    data={"model": model},
+                    files={"file": (filename, content, content_type)},
+                )
+        except httpx.HTTPError as exc:
+            raise DataSourceError("AI_CHAT_TRANSCRIPTION_FAILED", "语音转写连接失败") from exc
+        if response.status_code in {404, 405, 415, 501}:
+            raise AppError(
+                "AI_CHAT_TRANSCRIPTION_UNAVAILABLE",
+                "当前模型服务未启用语音转写，请改为打字",
+                status_code=422,
+            )
+        if response.status_code >= 400:
+            raise DataSourceError("AI_CHAT_TRANSCRIPTION_FAILED", f"语音转写失败：HTTP {response.status_code}")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise DataSourceError("AI_CHAT_TRANSCRIPTION_FAILED", "语音转写返回不是有效 JSON") from exc
+        text = str(data.get("text") or "").strip() if isinstance(data, dict) else ""
+        if not text:
+            raise DataSourceError("AI_CHAT_TRANSCRIPTION_EMPTY", "未识别到有效语音内容")
+        return text
+
     def _build_messages(self, request: CompareAiCommentaryRequest, config: CompareAiConfig) -> list[dict[str, str]]:
         persona_prompt = PERSONAS.get(config.persona_id, PERSONAS["researcher"])[2]
         if config.persona_id == "custom" and config.custom_persona:
@@ -327,6 +418,43 @@ class CompareAiService:
         if isinstance(message, dict):
             return str(message.get("content") or "").strip()
         return str(first.get("text") or "").strip()
+
+    @staticmethod
+    def _stream_delta(line: str) -> str | None:
+        raw = line.strip()
+        if not raw:
+            return None
+        if raw.startswith("data:"):
+            raw = raw[5:].strip()
+        if raw == "[DONE]":
+            return ""
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            return None
+        first = choices[0]
+        delta = first.get("delta")
+        if isinstance(delta, dict):
+            content = delta.get("content")
+        else:
+            message = first.get("message")
+            content = message.get("content") if isinstance(message, dict) else first.get("text")
+        if isinstance(content, list):
+            text = "".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict)
+            )
+            return text or None
+        if content is None:
+            return None
+        text = str(content)
+        return text or None
 
     def _read_config(self) -> CompareAiConfig:
         data = self._read_json(self.config_path, {})

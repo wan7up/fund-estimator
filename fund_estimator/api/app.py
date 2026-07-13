@@ -8,8 +8,8 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import File, FastAPI, Header, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from fund_estimator import __version__
@@ -52,6 +52,13 @@ from fund_estimator.models.schema import (
     WatchlistItem,
     WatchlistReorderRequest,
 )
+from fund_estimator.models.ai_chat import (
+    AiChatLoginRequest,
+    AiChatStatus,
+    AiChatStreamRequest,
+    AiChatTranscriptionResponse,
+)
+from fund_estimator.services.ai_chat import AI_CHAT_SESSION_COOKIE, AI_CHAT_SESSION_DAYS, AiChatService
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.compare_ai import (
     COMPARE_AI_SESSION_COOKIE,
@@ -80,6 +87,18 @@ from fund_estimator.models.etf import EtfOpportunityResponse
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 DEVICE_ID_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 logger = logging.getLogger(__name__)
+MAX_AI_CHAT_AUDIO_BYTES = 10 * 1024 * 1024
+ALLOWED_AI_CHAT_AUDIO_TYPES = {
+    "audio/aac",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+}
 
 
 def normalize_device_id(device_id: str | None) -> str:
@@ -123,6 +142,7 @@ def get_runtime_config() -> dict[str, object]:
             "0" if force_mock else "1",
         )
         == "1",
+        "ai_chat_transcription_model": os.getenv("FUND_ESTIMATOR_AI_TRANSCRIPTION_MODEL", "whisper-1"),
     }
 
 
@@ -208,11 +228,30 @@ def create_compare_ai_service(runtime_config: dict[str, object]) -> CompareAiSer
     )
 
 
+def create_ai_chat_service(
+    runtime_config: dict[str, object],
+    *,
+    estimator: FundEstimatorService,
+    watchlist: WatchlistService,
+    provider: CompareAiService,
+) -> AiChatService:
+    cache_path = Path(str(runtime_config["cache_path"]))
+    data_dir = cache_path.parent if cache_path.parent != Path("") else Path("data")
+    return AiChatService(
+        data_dir=data_dir,
+        password=os.getenv("FUND_ESTIMATOR_AI_CHAT_PASSWORD"),
+        estimator=estimator,
+        watchlist=watchlist,
+        provider=provider,
+        transcription_model=str(runtime_config["ai_chat_transcription_model"]),
+    )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="基金工具箱",
         version=__version__,
-        description="提供场外基金估值、套利监控和基金对比研究辅助。",
+        description="提供场外基金估值、套利监控、基金对比和基金 AI 咨询。",
     )
     estimator = create_estimator_service()
     watchlist = WatchlistService(estimator.cache)
@@ -223,6 +262,12 @@ def create_app() -> FastAPI:
     etf_monitor = create_etf_monitor_service(estimator)
     runtime_config = get_runtime_config()
     compare_ai = create_compare_ai_service(runtime_config)
+    ai_chat = create_ai_chat_service(
+        runtime_config,
+        estimator=estimator,
+        watchlist=watchlist,
+        provider=compare_ai,
+    )
 
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -271,6 +316,7 @@ def create_app() -> FastAPI:
     @app.get("/estimate", include_in_schema=False)
     @app.get("/arbitrage", include_in_schema=False)
     @app.get("/compare", include_in_schema=False)
+    @app.get("/ai-chat", include_in_schema=False)
     @app.get("/monitor", include_in_schema=False)
     async def shell_page() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
@@ -286,6 +332,10 @@ def create_app() -> FastAPI:
     @app.get("/tool/compare", include_in_schema=False)
     async def compare_tool_page() -> FileResponse:
         return FileResponse(WEB_DIR / "compare.html")
+
+    @app.get("/tool/ai-chat", include_in_schema=False)
+    async def ai_chat_tool_page() -> FileResponse:
+        return FileResponse(WEB_DIR / "ai_chat.html")
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -377,6 +427,62 @@ def create_app() -> FastAPI:
         raw_request: Request,
     ) -> CompareAiCommentaryResponse:
         return await compare_ai.create_commentary(request, raw_request.cookies.get(COMPARE_AI_SESSION_COOKIE))
+
+    @app.get("/api/ai-chat/status", response_model=AiChatStatus)
+    async def ai_chat_status(request: Request) -> AiChatStatus:
+        return ai_chat.status(request.cookies.get(AI_CHAT_SESSION_COOKIE))
+
+    @app.post("/api/ai-chat/login", response_model=AiChatStatus)
+    async def ai_chat_login(
+        request: AiChatLoginRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> AiChatStatus:
+        client_key = raw_request.client.host if raw_request.client else "unknown"
+        token = ai_chat.login(request.password, client_key)
+        response.set_cookie(
+            AI_CHAT_SESSION_COOKIE,
+            token,
+            max_age=AI_CHAT_SESSION_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return ai_chat.status(token)
+
+    @app.post("/api/ai-chat/stream")
+    async def ai_chat_stream(
+        request: AiChatStreamRequest,
+        raw_request: Request,
+        x_device_id: str | None = Header(None, alias="X-Device-Id"),
+    ) -> StreamingResponse:
+        ai_chat.require_authentication(raw_request.cookies.get(AI_CHAT_SESSION_COOKIE))
+        return StreamingResponse(
+            ai_chat.stream_events(request, device_id=normalize_device_id(x_device_id)),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/api/ai-chat/transcription", response_model=AiChatTranscriptionResponse)
+    async def ai_chat_transcription(
+        raw_request: Request,
+        file: UploadFile = File(...),
+    ) -> AiChatTranscriptionResponse:
+        ai_chat.require_authentication(raw_request.cookies.get(AI_CHAT_SESSION_COOKIE))
+        content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+        if content_type not in ALLOWED_AI_CHAT_AUDIO_TYPES:
+            raise AppError("AI_CHAT_AUDIO_TYPE_INVALID", "录音格式不受支持，请使用浏览器默认录音格式", status_code=422)
+        try:
+            content = await file.read(MAX_AI_CHAT_AUDIO_BYTES + 1)
+        finally:
+            await file.close()
+        if not content:
+            raise AppError("AI_CHAT_AUDIO_EMPTY", "未收到有效录音", status_code=422)
+        if len(content) > MAX_AI_CHAT_AUDIO_BYTES:
+            raise AppError("AI_CHAT_AUDIO_TOO_LARGE", "录音文件不能超过 10MB", status_code=413)
+        filename = Path(file.filename or "voice-recording.webm").name
+        text = await ai_chat.transcribe(filename=filename, content=content, content_type=content_type)
+        return AiChatTranscriptionResponse(text=text)
 
     @app.get("/api/watchlist", response_model=list[WatchlistItem])
     async def get_watchlist(x_device_id: str | None = Header(None, alias="X-Device-Id")) -> list[WatchlistItem]:

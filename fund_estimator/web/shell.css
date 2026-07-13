@@ -59,18 +59,24 @@ body {
 }
 
 .tool-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
   gap: 6px;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tool-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tool-tab {
-  min-width: 0;
+  flex: 0 0 auto;
   min-height: 34px;
   border: 1px solid #d3dbe8;
   border-radius: 8px;
-  padding: 0 6px;
+  padding: 0 10px;
   background: #ffffff;
   color: #41506a;
   font: inherit;
@@ -132,7 +138,7 @@ body {
 
   .tool-tab {
     min-height: 32px;
-    padding: 0 4px;
+    padding: 0 8px;
     font-size: 13px;
   }
 }
