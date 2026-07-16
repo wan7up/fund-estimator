@@ -126,6 +126,32 @@ body {
   }
 }
 
+@media (max-width: 620px) {
+  .shell-header {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 6px 10px;
+  }
+
+  .tool-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    overflow: visible;
+  }
+
+  .tool-tab {
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 3px;
+    font-size: 13px;
+  }
+
+  .tool-shell {
+    height: calc(100dvh - 76px);
+  }
+}
+
 @media (max-width: 390px) {
   .shell-brand strong {
     font-size: 15px;
@@ -137,8 +163,6 @@ body {
   }
 
   .tool-tab {
-    min-height: 32px;
-    padding: 0 8px;
-    font-size: 13px;
+    font-size: 12px;
   }
 }
