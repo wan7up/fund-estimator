@@ -147,7 +147,7 @@ function renderControls() {
   els.stopBtn.hidden = !state.sending;
   els.recordBtn.disabled = state.sending;
   els.recordBtn.classList.toggle("recording", recording);
-  els.recordBtn.title = recording ? "点击结束录音" : "按下开始录音，再次点击结束";
+  els.recordBtn.title = recording ? "点击结束录音并直接发送" : "点击开始录音，再次点击结束后直接发送";
   els.recordBtn.setAttribute("aria-label", recording ? "结束录音" : "语音提问");
 }
 
@@ -224,8 +224,8 @@ async function login(event) {
       els.loginForm.hidden = true;
       return;
     }
-    setStatus("已关联本设备自选基金，可语音或文字咨询");
-    showChat();
+    setStatus("验证成功，正在进入咨询");
+    window.location.reload();
   } catch (error) {
     setLoginError(error.message);
   } finally {
@@ -248,9 +248,9 @@ function parseSseBlock(block) {
   }
 }
 
-async function sendMessage(event) {
-  event.preventDefault();
-  const message = els.messageInput.value.trim();
+async function sendMessage(event, directMessage = null) {
+  event?.preventDefault();
+  const message = String(directMessage ?? els.messageInput.value).trim();
   if (!message || state.sending) return;
   stopSpeaking();
   setError("");
@@ -438,10 +438,10 @@ async function finishRecording() {
     const form = new FormData();
     form.append("file", new File([blob], `voice-recording.${extension}`, { type }));
     const text = await api("/api/ai-chat/transcription", { method: "POST", body: form });
-    els.messageInput.value = text.text || "";
-    resizeInput();
-    els.messageInput.focus();
-    setStatus("语音已转为文字，可编辑后发送");
+    const recognized = String(text.text || "").trim();
+    if (!recognized) throw new Error("未识别到有效语音内容");
+    setStatus("语音已识别，正在发送");
+    await sendMessage(null, recognized);
   } catch (error) {
     setError(error.message || "语音转写失败");
     setStatus("已关联本设备自选基金，可语音或文字咨询");
