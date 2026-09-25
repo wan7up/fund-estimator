@@ -53,6 +53,17 @@ docker compose -f docker-compose.quickstart.yml up -d --build
 
 打开 `http://服务器IP:8000`。SQLite 数据默认保存在 `./data/fund_estimator.sqlite3`。
 
+使用 Docker Compose 部署到服务器时，建议同时安装 `deploy/systemd/fund-tools-compose.service`，这样服务器重启后会自动拉起 FastAPI 和 HTTPS 反代容器：
+
+```bash
+sudo cp deploy/systemd/fund-tools-compose.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fund-tools-compose.service
+sudo systemctl status fund-tools-compose.service
+```
+
+该服务只负责执行 Compose 启停，不会删除 `data/` 数据目录；证书、AI 配置和自选基金数据会继续保留。
+
 仓库里的 `docker-compose.yml` 是带 HTTPS 反代的生产模板，适合已经准备好证书和 Nginx 配置的服务器；第一次部署建议先使用 `docker-compose.quickstart.yml`。
 
 默认启动会连接真实东方财富/天天基金数据源。离线演示可强制使用内置 mock 数据：
