@@ -8,6 +8,10 @@ import pytest
 from fund_estimator.models.schema import FundAssetAllocation, FundDetailInfo, FundHoldings, FundProfile, HoldingItem, StockQuote
 from fund_estimator.services.cache import SQLiteCache
 from fund_estimator.services.estimator import MARKET_TZ, FundEstimatorService
+from fund_estimator.data_sources.trading_calendar import (
+    TradingCalendarUnavailable,
+    is_trading_day,
+)
 from fund_estimator.services.exceptions import DataSourceError
 
 
@@ -370,6 +374,45 @@ def test_estimate_date_uses_previous_trading_day_before_open():
     assert FundEstimatorService._current_estimate_date(before_open) == date(2026, 5, 25)
     assert FundEstimatorService._current_estimate_date(after_open) == date(2026, 5, 26)
     assert FundEstimatorService._current_estimate_date(monday_before_open) == date(2026, 5, 29)
+
+
+def test_estimate_date_skips_statutory_holiday_and_weekends():
+    holiday = datetime(2026, 9, 25, 14, 0, tzinfo=MARKET_TZ)
+    saturday = datetime(2026, 9, 26, 10, 0, tzinfo=MARKET_TZ)
+    makeup_saturday = datetime(2026, 10, 10, 10, 0, tzinfo=MARKET_TZ)
+
+    assert is_trading_day(holiday.date()) is False
+    assert is_trading_day(saturday.date()) is False
+    assert is_trading_day(makeup_saturday.date()) is False
+    assert FundEstimatorService._current_estimate_date(holiday) == date(2026, 9, 24)
+    assert FundEstimatorService._current_estimate_date(saturday) == date(2026, 9, 24)
+    assert FundEstimatorService._current_estimate_date(makeup_saturday) == date(2026, 10, 9)
+
+
+def test_unknown_calendar_year_fails_closed(monkeypatch):
+    def unsupported_year(_):
+        raise NotImplementedError
+
+    monkeypatch.setattr("fund_estimator.data_sources.trading_calendar.is_workday", unsupported_year)
+
+    with pytest.raises(TradingCalendarUnavailable):
+        is_trading_day(date(2027, 1, 4))
+
+
+def test_holiday_estimate_is_marked_as_non_trading_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        FundEstimatorService,
+        "_current_estimate_date",
+        staticmethod(lambda now=None: date(2026, 9, 24)),
+    )
+    monkeypatch.setattr("fund_estimator.services.estimator.is_trading_day", lambda value: False)
+    service = make_service(tmp_path)
+
+    result = asyncio.run(service.estimate("123456", mode="both"))
+
+    assert result.is_trading_day is False
+    assert result.estimated_nav_date == date(2026, 9, 24)
+    assert any("今日休市" in note for note in result.notes)
 
 
 def test_partial_missing_quote_is_reported(tmp_path):

@@ -166,6 +166,7 @@ class EstimateResponse(BaseModel):
     estimate_time: datetime
     valuation_status: Literal["estimated", "official_nav"] = "estimated"
     is_official_nav: bool = False
+    is_trading_day: bool = True
     holdings_date: date | None = None
     top10_weight_sum: float
     usable_weight_sum: float

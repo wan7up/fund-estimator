@@ -26,6 +26,7 @@ const state = {
   estimates: new Map(),
   selectedCode: null,
   refreshInFlight: false,
+  marketIsTradingDay: null,
   expandedHoldings: new Set(),
   deviceId: getDeviceId(),
   recentlyAddedCode: null,
@@ -493,6 +494,10 @@ async function refreshEstimates(options = {}) {
       method: "POST",
       body: JSON.stringify({ codes, mode: "both" }),
     });
+    const estimates = results.filter((item) => item.ok && item.estimate);
+    state.marketIsTradingDay = estimates.length
+      ? estimates.every((item) => item.estimate.is_trading_day !== false)
+      : null;
     saveTodayEstimateCache(results);
     state.estimates.clear();
     for (const item of results) {
@@ -503,8 +508,17 @@ async function refreshEstimates(options = {}) {
     }
     renderRows();
     renderDetail(state.selectedCode);
-    const refreshHint = shouldAutoRefresh() ? " · 开市中自动刷新" : "";
-    els.statusText.textContent = `已更新 ${new Date().toLocaleTimeString()}${refreshHint}`;
+    if (state.marketIsTradingDay === false) {
+      const latestDate = estimates
+        .map((item) => estimatedDateText(item.estimate))
+        .filter(Boolean)
+        .sort()
+        .at(-1);
+      els.statusText.textContent = `今日休市 · 显示最近交易日 ${latestDate || "--"}`;
+    } else {
+      const refreshHint = shouldAutoRefresh() ? " · 开市中自动刷新" : "";
+      els.statusText.textContent = `已更新 ${new Date().toLocaleTimeString()}${refreshHint}`;
+    }
   } finally {
     state.refreshInFlight = false;
   }
@@ -918,12 +932,13 @@ function localDateText(now = new Date()) {
 }
 
 function shouldAutoRefresh(now = new Date()) {
+  if (state.marketIsTradingDay === false) return false;
   if (!isMarketRefreshWindow(now) || !state.watchlist.length) return false;
   if (!state.estimates.size) return true;
   const today = localDateText(now);
   return Array.from(state.estimates.values()).some((result) => {
     const est = result?.estimate;
-    return result?.ok && est && !isOfficial(est) && estimatedDateText(est) === today;
+    return result?.ok && est && est.is_trading_day !== false && !isOfficial(est) && estimatedDateText(est) === today;
   });
 }
 

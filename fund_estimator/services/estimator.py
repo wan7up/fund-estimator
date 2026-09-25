@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time
 from typing import Any, Literal, TypeVar
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
 
 from fund_estimator.data_sources.eastmoney import infer_market, to_eastmoney_secid
+from fund_estimator.data_sources.trading_calendar import (
+    TradingCalendarUnavailable,
+    is_trading_day,
+    previous_trading_day,
+)
 from fund_estimator.models.schema import (
     EstimateModeResult,
     EstimateResponse,
@@ -115,8 +120,18 @@ class FundEstimatorService:
         mode: Literal["raw", "normalized", "enhanced", "both"] = "both",
     ) -> EstimateResponse:
         self._validate_fund_code(code)
+        now = datetime.now(MARKET_TZ)
+        try:
+            estimate_date = self._current_estimate_date(now)
+            trading_day = is_trading_day(now.date())
+        except TradingCalendarUnavailable as exc:
+            raise AppError(
+                "TRADING_CALENDAR_UNAVAILABLE",
+                "交易日历暂未覆盖当前日期，已暂停估值以避免生成错误日期",
+                status_code=503,
+            ) from exc
         profile = await self.get_profile(code)
-        official_nav_available = self._is_current_day_official_nav(profile)
+        official_nav_available = self._is_current_day_official_nav(profile, now=now)
 
         if official_nav_available:
             try:
@@ -125,9 +140,15 @@ class FundEstimatorService:
                     profile,
                     mode=mode,
                     official_nav_available=True,
+                    estimate_date=estimate_date,
+                    trading_day=trading_day,
                 )
             except AppError as exc:
-                response = self._build_official_nav_response(profile)
+                response = self._build_official_nav_response(
+                    profile,
+                    estimate_date=estimate_date,
+                    trading_day=trading_day,
+                )
                 response.warnings.append(f"未生成预估复盘值：{exc.message}")
                 return response
 
@@ -136,6 +157,8 @@ class FundEstimatorService:
             profile,
             mode=mode,
             official_nav_available=False,
+            estimate_date=estimate_date,
+            trading_day=trading_day,
         )
 
     async def _build_market_estimate_response(
@@ -145,8 +168,9 @@ class FundEstimatorService:
         *,
         mode: Literal["raw", "normalized", "enhanced", "both"],
         official_nav_available: bool,
+        estimate_date: date,
+        trading_day: bool,
     ) -> EstimateResponse:
-        estimate_date = self._current_estimate_date()
         if official_nav_available:
             if profile.previous_nav is None or profile.previous_nav <= 0:
                 raise AppError(
@@ -168,6 +192,8 @@ class FundEstimatorService:
                     mode=mode,
                     official_nav_available=official_nav_available,
                     estimate_base_nav=estimate_base_nav,
+                    estimate_date=estimate_date,
+                    trading_day=trading_day,
                 )
             raise
         if not holdings.items:
@@ -177,6 +203,8 @@ class FundEstimatorService:
                 mode=mode,
                 official_nav_available=official_nav_available,
                 estimate_base_nav=estimate_base_nav,
+                estimate_date=estimate_date,
+                trading_day=trading_day,
             )
 
         quoteable_codes = [
@@ -292,6 +320,8 @@ class FundEstimatorService:
                 "当天官方净值已经更新，当前主展示以官方净值为准",
                 f"模型估值以 {base_date} 官方净值为基准，仅用于复盘对比",
             ] + notes
+        if not trading_day:
+            notes.insert(0, f"今日休市，估值停留在最近交易日 {estimate_date.isoformat()}")
 
         selected = self._select_primary_result(
             mode=mode,
@@ -316,6 +346,7 @@ class FundEstimatorService:
             estimate_time=datetime.now(UTC),
             valuation_status="official_nav" if official_nav_available else "estimated",
             is_official_nav=official_nav_available,
+            is_trading_day=trading_day,
             holdings_date=holdings.holdings_date,
             top10_weight_sum=holdings.top10_weight_sum,
             usable_weight_sum=round(usable_weight_sum, 4),
@@ -344,8 +375,9 @@ class FundEstimatorService:
         mode: Literal["raw", "normalized", "enhanced", "both"],
         official_nav_available: bool,
         estimate_base_nav: float,
+        estimate_date: date,
+        trading_day: bool,
     ) -> EstimateResponse:
-        estimate_date = self._current_estimate_date()
         proxy_quote = await self._find_proxy_quote(profile)
         if proxy_quote is None:
             raise AppError("HOLDINGS_NOT_AVAILABLE", f"基金 {code} 没有可解析的前十大持仓", status_code=422)
@@ -383,6 +415,8 @@ class FundEstimatorService:
             base_date = profile.previous_nav_date.isoformat() if profile.previous_nav_date else "上一期"
             notes.insert(0, "当天官方净值已经更新，当前主展示以官方净值为准")
             notes.insert(1, f"模型估值以 {base_date} 官方净值为基准，仅用于复盘对比")
+        if not trading_day:
+            notes.insert(0, f"今日休市，估值停留在最近交易日 {estimate_date.isoformat()}")
 
         proxy_holding = HoldingEstimate(
             stock_code=proxy_quote.stock_code,
@@ -411,6 +445,7 @@ class FundEstimatorService:
             estimate_time=datetime.now(UTC),
             valuation_status="official_nav" if official_nav_available else "estimated",
             is_official_nav=official_nav_available,
+            is_trading_day=trading_day,
             holdings_date=None,
             top10_weight_sum=0,
             usable_weight_sum=0,
@@ -472,10 +507,24 @@ class FundEstimatorService:
     def _looks_exchange_traded_fund_code(code: str) -> bool:
         return code.startswith(EXCHANGE_TRADED_FUND_PREFIXES)
 
-    def _build_official_nav_response(self, profile: FundProfile) -> EstimateResponse:
+    def _build_official_nav_response(
+        self,
+        profile: FundProfile,
+        *,
+        estimate_date: date | None = None,
+        trading_day: bool | None = None,
+    ) -> EstimateResponse:
         warnings: list[str] = []
         if profile.stale:
             warnings.append("基金净值使用了过期缓存数据")
+        trading_day = is_trading_day(datetime.now(MARKET_TZ).date()) if trading_day is None else trading_day
+        estimate_date = estimate_date or self._current_estimate_date()
+        notes = [
+            "官方净值已经更新，当前返回基金公司/数据源披露的正式净值",
+            "开市前不重新计算盘中预估值",
+        ]
+        if not trading_day:
+            notes.insert(0, f"今日休市，估值停留在最近交易日 {estimate_date.isoformat()}")
         return EstimateResponse(
             fund_code=profile.code,
             fund_name=profile.name,
@@ -491,6 +540,7 @@ class FundEstimatorService:
             estimate_time=datetime.now(UTC),
             valuation_status="official_nav",
             is_official_nav=True,
+            is_trading_day=trading_day,
             holdings_date=None,
             top10_weight_sum=0,
             usable_weight_sum=0,
@@ -505,10 +555,7 @@ class FundEstimatorService:
             enhanced=None,
             theme_proxy=None,
             confidence="high",
-            notes=[
-                "官方净值已经更新，当前返回基金公司/数据源披露的正式净值",
-                "开市前不重新计算盘中预估值",
-            ],
+            notes=notes,
             warnings=warnings,
             holdings=[],
             data_source=f"profile:{profile.source}",
@@ -681,24 +728,25 @@ class FundEstimatorService:
         )
 
     @staticmethod
-    def _is_current_day_official_nav(profile: FundProfile) -> bool:
-        estimate_date = FundEstimatorService._current_estimate_date()
+    def _is_current_day_official_nav(
+        profile: FundProfile,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        estimate_date = FundEstimatorService._current_estimate_date(now)
         return profile.nav_date >= estimate_date
 
     @staticmethod
     def _current_estimate_date(now: datetime | None = None) -> date:
         now = now or datetime.now(MARKET_TZ)
         current_date = now.date()
-        if now.timetz().replace(tzinfo=None) < MARKET_OPEN_TIME:
+        if not is_trading_day(current_date) or now.timetz().replace(tzinfo=None) < MARKET_OPEN_TIME:
             return FundEstimatorService._previous_trading_day(current_date)
         return current_date
 
     @staticmethod
     def _previous_trading_day(current_date: date) -> date:
-        candidate = current_date - timedelta(days=1)
-        while candidate.weekday() >= 5:
-            candidate -= timedelta(days=1)
-        return candidate
+        return previous_trading_day(current_date)
 
     @staticmethod
     def _validate_fund_code(code: str) -> None:
