@@ -93,7 +93,7 @@ def test_watchlist_reorder(tmp_path, monkeypatch):
     assert [item["code"] for item in watch_response.json()] == ["001438", "000001"]
 
 
-def test_watchlist_is_scoped_by_device(tmp_path, monkeypatch):
+def test_watchlist_is_shared_across_devices(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
     response = client.post("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
@@ -102,28 +102,13 @@ def test_watchlist_is_scoped_by_device(tmp_path, monkeypatch):
     phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
     phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
 
+    # 单用户自部署：设备 ID 被忽略，所有浏览器共享同一个服务端列表
     assert [item["code"] for item in phone_a.json()] == ["001438"]
-    assert phone_b.json() == []
-
-
-def test_new_device_copies_legacy_default_watchlist_once(tmp_path, monkeypatch):
-    client = make_client(tmp_path, monkeypatch)
-    cache = SQLiteCache(tmp_path / "api.sqlite3")
-    cache.add_watchlist("001438", "旧自选")
-
-    first_open = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
-    assert [item["code"] for item in first_open.json()] == ["001438"]
-
-    delete_response = client.delete("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
-    assert delete_response.status_code == 200
-
-    phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
-    default_list = client.get("/api/watchlist")
-    phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
-
-    assert phone_a.json() == []
-    assert [item["code"] for item in default_list.json()] == ["001438"]
     assert [item["code"] for item in phone_b.json()] == ["001438"]
+
+    delete_response = client.delete("/api/watchlist/001438", headers={"X-Device-Id": "phone-b"})
+    assert delete_response.status_code == 200
+    assert client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json() == []
 
 
 def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):
