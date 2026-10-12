@@ -93,37 +93,37 @@ def test_watchlist_reorder(tmp_path, monkeypatch):
     assert [item["code"] for item in watch_response.json()] == ["001438", "000001"]
 
 
-def test_watchlist_new_device_inherits_recent_list(tmp_path, monkeypatch):
+def test_watchlist_new_device_starts_with_default_candidate(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
     response = client.post("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
     assert response.status_code == 200
 
+    # phone-a 也是新设备：默认候选 + 自己添加的
     phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
-    assert [item["code"] for item in phone_a.json()] == ["001438"]
+    assert [item["code"] for item in phone_a.json()] == ["001438", "011370"]
 
-    # 新设备首次访问：自动继承最近活跃设备的自选列表
+    # 新设备 phone-b 不继承 phone-a 的列表，只有默认候选
     phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
-    assert [item["code"] for item in phone_b.json()] == ["001438"]
+    assert [item["code"] for item in phone_b.json()] == ["011370"]
 
-    # 继承后各设备独立：phone-b 删除不影响 phone-a
-    delete_response = client.delete("/api/watchlist/001438", headers={"X-Device-Id": "phone-b"})
+    # 各设备独立：phone-b 删除不影响 phone-a
+    delete_response = client.delete("/api/watchlist/011370", headers={"X-Device-Id": "phone-b"})
     assert delete_response.status_code == 200
     assert client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"}).json() == []
-    assert [item["code"] for item in client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json()] == ["001438"]
+    assert [item["code"] for item in client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json()] == ["001438", "011370"]
 
 
-def test_watchlist_new_device_never_inherits_default_archive(tmp_path, monkeypatch):
+def test_watchlist_new_device_ignores_default_archive(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
-    # default 是历史合并存档：即使有全量旧列表，也永不做新设备的继承来源。
-    # 每个设备的底以真实设备删完剩下的为准。
+    # default 是历史合并存档：新设备不继承它，只带默认候选。
     cache = SQLiteCache(tmp_path / "api.sqlite3")
     cache.add_watchlist("000001", "存档基金", device_id="default")
 
     response = client.get("/api/watchlist", headers={"X-Device-Id": "brand-new"})
 
     assert response.status_code == 200
-    assert response.json() == []
+    assert [item["code"] for item in response.json()] == ["011370"]
 
 
 def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):

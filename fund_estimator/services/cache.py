@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Any
 
 
+# 新设备首次出现时默认展示的候选基金（2026-10-13 用户指定）：
+# 新设备不继承任何已有列表，先展示这一只，用户自行增删。
+NEW_DEVICE_CANDIDATE_CODE = "011370"
+NEW_DEVICE_CANDIDATE_NAME = "华商均衡成长混合C"
+
+
 class SQLiteCache:
     def __init__(self, path: str | Path = "data/fund_estimator.sqlite3") -> None:
         self.path = Path(path)
@@ -138,54 +144,15 @@ class SQLiteCache:
             "INSERT INTO watchlist_devices (device_id, created_at, last_active_at) VALUES (?, ?, ?)",
             (device_id, now, now),
         )
-        # 新设备首次出现：继承“最近活跃且列表非空”的那份列表，
-        # 这样浏览器清缓存/换设备后自动接上之前的自选，无需手动恢复。
-        # default 是历史合并存档，永不做继承来源——设备列表的底以真实设备
-        # 删完剩下的为准，避免旧全量列表在新设备上复活。
-        source_row = conn.execute(
+        # 新设备不继承任何已有列表（含 default 存档），
+        # 默认只展示一只候选基金，之后的增删都以这份为底。
+        conn.execute(
             """
-            SELECT d.device_id
-            FROM watchlist_devices d
-            WHERE d.device_id != ?
-              AND d.device_id != 'default'
-              AND EXISTS (SELECT 1 FROM watchlist w WHERE w.device_id = d.device_id)
-            ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
-            LIMIT 1
+            INSERT INTO watchlist (device_id, code, name, added_at, sort_order)
+            VALUES (?, ?, ?, ?, 0)
             """,
-            (device_id,),
-        ).fetchone()
-        if source_row is None:
-            return
-        rows = conn.execute(
-            """
-            SELECT code, name, added_at, sort_order
-            FROM watchlist
-            WHERE device_id = ?
-            ORDER BY sort_order ASC, added_at ASC
-            """,
-            (source_row["device_id"],),
-        ).fetchall()
-        for row in rows:
-            conn.execute(
-                """
-                INSERT INTO watchlist (device_id, code, name, added_at, sort_order)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (device_id, row["code"], row["name"], row["added_at"], row["sort_order"]),
-            )
-
-    def most_recent_watchlist_device(self) -> str:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT d.device_id
-                FROM watchlist_devices d
-                WHERE EXISTS (SELECT 1 FROM watchlist w WHERE w.device_id = d.device_id)
-                ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
-                LIMIT 1
-                """
-            ).fetchone()
-        return row["device_id"] if row else "default"
+            (device_id, NEW_DEVICE_CANDIDATE_CODE, NEW_DEVICE_CANDIDATE_NAME, now),
+        )
 
     def get(self, namespace: str, key: str, *, include_expired: bool = False) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -338,39 +305,7 @@ class SQLiteCache:
             "INSERT INTO lof_watchlist_devices (device_id, created_at, last_active_at) VALUES (?, ?, ?)",
             (device_id, now, now),
         )
-        # 与场外自选一致：新设备继承最近活跃且列表非空的真实设备 LOF 自选，
-        # default 存档不参与继承。
-        source_row = conn.execute(
-            """
-            SELECT d.device_id
-            FROM lof_watchlist_devices d
-            WHERE d.device_id != ?
-              AND d.device_id != 'default'
-              AND EXISTS (SELECT 1 FROM lof_watchlist w WHERE w.device_id = d.device_id)
-            ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
-            LIMIT 1
-            """,
-            (device_id,),
-        ).fetchone()
-        if source_row is None:
-            return
-        rows = conn.execute(
-            """
-            SELECT code, name, added_at, sort_order
-            FROM lof_watchlist
-            WHERE device_id = ?
-            ORDER BY sort_order ASC, added_at ASC
-            """,
-            (source_row["device_id"],),
-        ).fetchall()
-        for row in rows:
-            conn.execute(
-                """
-                INSERT INTO lof_watchlist (device_id, code, name, added_at, sort_order)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (device_id, row["code"], row["name"], row["added_at"], row["sort_order"]),
-            )
+        # 新设备不继承任何已有列表，LOF 自选从空开始。
 
     def most_recent_lof_watchlist_device(self) -> str:
         with self._connect() as conn:

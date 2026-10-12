@@ -605,7 +605,7 @@ def test_high_single_day_official_premium_skips_cross_day_confirmation(tmp_path)
     assert "单日高折溢价信号，需确认当日估算净值" in item.risks
 
 
-def test_lof_watchlist_new_device_inherits_recent_list(tmp_path):
+def test_lof_watchlist_new_device_starts_empty(tmp_path):
     service = make_service(tmp_path)
 
     added = __import__("asyncio").run(service.add_watchlist("161128", "phone-a"))
@@ -613,21 +613,13 @@ def test_lof_watchlist_new_device_inherits_recent_list(tmp_path):
     assert added.code == "161128"
     assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
 
-    # 新设备首次访问：自动继承最近活跃设备 phone-a 的列表
-    assert [item.code for item in service.list_watchlist("phone-b")] == ["161128"]
-
-    # 继承后各设备独立：phone-b 删除不影响 phone-a
-    assert service.delete_watchlist("161128", "phone-b") is True
-    assert service.list_watchlist("phone-b") == []
-    assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
-
-
-def test_lof_watchlist_new_device_never_inherits_default_archive(tmp_path):
-    service = make_service(tmp_path)
-    # default 存档里有旧全量 LOF 列表，但新设备不应从它继承
+    # 新设备不继承任何已有列表（含 default 存档），LOF 自选从空开始
     service.cache.add_lof_watchlist("160123", "存档LOF", device_id="default")
+    assert service.list_watchlist("phone-b") == []
 
-    assert service.list_watchlist("brand-new") == []
+    # 各设备独立：phone-b 删不了 phone-a 的
+    assert service.delete_watchlist("161128", "phone-b") is False
+    assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
 
 
 def test_lof_search_filters_non_lof(tmp_path):
