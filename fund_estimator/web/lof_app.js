@@ -1,4 +1,5 @@
-const DEVICE_ID_KEY = "lof_premium_monitor_device_id";
+const DEVICE_ID_KEY = "fund_estimator_device_id";
+const LEGACY_LOF_DEVICE_ID_KEY = "lof_premium_monitor_device_id";
 
 function createDeviceId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -9,9 +10,11 @@ function createDeviceId() {
 
 function getDeviceId() {
   try {
+    // 与估值页共用同一个设备号：一台浏览器一个号，自选列表沟通和继承都更清晰。
     let deviceId = window.localStorage.getItem(DEVICE_ID_KEY);
     if (!deviceId) {
-      deviceId = createDeviceId();
+      // 老版本套利页独立设备号迁移：沿用旧号，避免再生成新号导致列表分裂。
+      deviceId = window.localStorage.getItem(LEGACY_LOF_DEVICE_ID_KEY) || createDeviceId();
       window.localStorage.setItem(DEVICE_ID_KEY, deviceId);
     }
     return deviceId;
