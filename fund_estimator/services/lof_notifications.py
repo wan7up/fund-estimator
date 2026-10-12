@@ -438,6 +438,7 @@ class LofNoticeService:
         }
         payload.pop("feishu_onboard", None)
         payload.pop("feishu_oauth", None)
+        payload.pop("feishu_tenant_token", None)
         payload["last_error"] = None
         payload["notice_provider"] = "feishu_openapi"
         payload["updated_at"] = now.isoformat(timespec="seconds")
@@ -450,6 +451,7 @@ class LofNoticeService:
         payload.pop("feishu_app", None)
         payload.pop("feishu_onboard", None)
         payload.pop("feishu_oauth", None)
+        payload.pop("feishu_tenant_token", None)
         payload["last_status"] = None
         payload["last_error"] = None
         payload["notice_provider"] = "feishu_openapi"
@@ -1262,7 +1264,12 @@ class LofNoticeService:
         cached = state.get("feishu_tenant_token") if isinstance(state.get("feishu_tenant_token"), dict) else {}
         cached_token = str(cached.get("tenant_access_token") or "")
         expires_at = self._parse_time(cached.get("expires_at"))
-        if cached_token and expires_at is not None and expires_at > datetime.now(UTC) + timedelta(minutes=5):
+        if (
+            cached_token
+            and str(cached.get("app_id") or "") == app_id
+            and expires_at is not None
+            and expires_at > datetime.now(UTC) + timedelta(minutes=5)
+        ):
             return cached_token
         response = self._feishu_post(
             "/open-apis/auth/v3/tenant_access_token/internal",
@@ -1274,6 +1281,7 @@ class LofNoticeService:
             raise AppError("FEISHU_TENANT_TOKEN_MISSING", "飞书未返回 tenant_access_token。", status_code=502, details=data)
         expire_seconds = _int_env(str(data.get("expire") or ""), 7200)
         state["feishu_tenant_token"] = {
+            "app_id": app_id,
             "tenant_access_token": token,
             "expires_at": (datetime.now(UTC) + timedelta(seconds=max(60, expire_seconds - 60))).isoformat(timespec="seconds"),
         }

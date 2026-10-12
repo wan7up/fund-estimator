@@ -939,6 +939,42 @@ def test_lof_notice_feishu_qr_connect_stores_app_and_user_target(tmp_path):
     assert "feishu_onboard" not in stored
 
 
+def test_lof_notice_tenant_token_cache_is_scoped_to_app(tmp_path):
+    config = LofNoticeConfig(
+        enabled=True,
+        timeout_seconds=5,
+        notice_dir=tmp_path,
+    )
+    notice = LofNoticeService(config)
+    state = {
+        "feishu": {"open_id": "ou_new"},
+        "feishu_app": {"app_id": "cli_new", "app_secret": "secret_new"},
+        # 旧 app 遗留的缓存 token：未过期但 app_id 不匹配
+        "feishu_tenant_token": {
+            "tenant_access_token": "old_token",
+            "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(timespec="seconds"),
+        },
+    }
+    token_calls: list[str] = []
+
+    def fake_feishu_post(path, *, json_body, token=None):
+        token_calls.append(str(json_body.get("app_id")))
+        return {"code": 0, "tenant_access_token": "new_token", "expire": 7200}
+
+    notice._feishu_post = fake_feishu_post  # type: ignore[method-assign]
+
+    first = notice._get_tenant_access_token(state)
+    assert first == "new_token"
+    assert token_calls == ["cli_new"]
+    assert state["feishu_tenant_token"]["app_id"] == "cli_new"
+    assert state["feishu_tenant_token"]["tenant_access_token"] == "new_token"
+
+    # 同一 app 的未过期缓存直接复用，不再请求 token 接口
+    second = notice._get_tenant_access_token(state)
+    assert second == "new_token"
+    assert token_calls == ["cli_new"]
+
+
 def test_lof_notice_daily_summary_sends_once_per_day(tmp_path):
     service = make_service(tmp_path)
     response = __import__("asyncio").run(service.get_opportunities(limit=20))
