@@ -339,6 +339,15 @@ def create_app() -> FastAPI:
                     except AppError:
                         profile = None
                     return BatchEstimateItem(code=code, ok=False, profile=profile, error=exc.to_error())
+                except Exception as exc:
+                    # 单只基金的意外异常（解析错误/网络超时等）只标记该项失败，
+                    # 不让整批请求 500。
+                    logger.exception("batch estimate item %s failed", code)
+                    return BatchEstimateItem(
+                        code=code,
+                        ok=False,
+                        error={"code": "ESTIMATE_ITEM_FAILED", "message": str(exc) or exc.__class__.__name__},
+                    )
 
         return await asyncio.gather(*(estimate_one(code) for code in request.codes))
 

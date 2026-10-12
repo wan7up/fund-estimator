@@ -125,6 +125,38 @@ def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):
     assert body[1]["error"]["code"] == "FUND_NOT_FOUND"
 
 
+def test_batch_estimate_unexpected_item_error_is_isolated(tmp_path, monkeypatch):
+    # 单只基金抛出非 AppError 的意外异常（如上游页面解析错误）时，
+    # 只标记该只失败，其余照常返回，整批不 500。
+    monkeypatch.setenv("FUND_ESTIMATOR_FORCE_MOCK", "1")
+    monkeypatch.setenv("FUND_ESTIMATOR_DB", str(tmp_path / "boom.sqlite3"))
+    module = importlib.import_module("fund_estimator.api.app")
+    real = module.create_estimator_service()
+
+    class BoomEstimator:
+        cache = real.cache
+
+        async def estimate(self, code, mode="both"):
+            if code == "001439":
+                raise RuntimeError("unexpected parse failure")
+            return await real.estimate(code, mode=mode)
+
+        async def get_profile(self, code):
+            return await real.get_profile(code)
+
+    monkeypatch.setattr(module, "create_estimator_service", lambda: BoomEstimator())
+    client = TestClient(module.create_app())
+
+    response = client.post("/api/estimate/batch", json={"codes": ["001438", "001439"], "mode": "both"})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert [item["code"] for item in body if item["ok"]] == ["001438"]
+    failed = next(item for item in body if not item["ok"])
+    assert failed["code"] == "001439"
+    assert failed["error"]["code"] == "ESTIMATE_ITEM_FAILED"
+
+
 def test_compare_api_returns_mock_comparison(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 

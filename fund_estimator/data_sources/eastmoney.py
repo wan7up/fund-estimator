@@ -281,6 +281,10 @@ def _decode_archives_content(text: str) -> str:
 
 def parse_holdings_response(code: str, text: str) -> FundHoldings:
     content = _decode_archives_content(text)
+    if not content.strip():
+        # 东财 F10 偶发返回空页（风控/无披露）：转成业务错误，
+        # 避免 lxml 抛 ParserError 导致整批估值 500。
+        raise AppError("HOLDINGS_NOT_AVAILABLE", f"基金 {code} 暂无可用持仓数据", status_code=404)
     date_match = re.search(r"(\d{4}-\d{2}-\d{2})", content)
     if not date_match:
         date_match = re.search(r"(\d{4}-\d{2}-\d{2})", text)

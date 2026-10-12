@@ -125,6 +125,19 @@ def test_parse_holdings_response_from_html():
     assert holdings.top10_weight_sum == 18.4
 
 
+def test_parse_holdings_response_empty_content_raises_app_error():
+    # 东财 F10 偶发空页：应转成 HOLDINGS_NOT_AVAILABLE 业务错误，
+    # 而不是让 lxml 抛 ParserError 炸掉整批估值。
+    import pytest
+
+    from fund_estimator.services.exceptions import AppError
+
+    with pytest.raises(AppError) as exc_info:
+        parse_holdings_response("001438", "")
+
+    assert exc_info.value.code == "HOLDINGS_NOT_AVAILABLE"
+
+
 def test_parse_quote_response():
     payload = {
         "data": {
