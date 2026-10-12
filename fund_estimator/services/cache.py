@@ -140,11 +140,14 @@ class SQLiteCache:
         )
         # 新设备首次出现：继承“最近活跃且列表非空”的那份列表，
         # 这样浏览器清缓存/换设备后自动接上之前的自选，无需手动恢复。
+        # default 是历史合并存档，永不做继承来源——设备列表的底以真实设备
+        # 删完剩下的为准，避免旧全量列表在新设备上复活。
         source_row = conn.execute(
             """
             SELECT d.device_id
             FROM watchlist_devices d
             WHERE d.device_id != ?
+              AND d.device_id != 'default'
               AND EXISTS (SELECT 1 FROM watchlist w WHERE w.device_id = d.device_id)
             ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
             LIMIT 1
@@ -335,12 +338,14 @@ class SQLiteCache:
             "INSERT INTO lof_watchlist_devices (device_id, created_at, last_active_at) VALUES (?, ?, ?)",
             (device_id, now, now),
         )
-        # 与场外自选一致：新设备继承最近活跃且列表非空的 LOF 自选。
+        # 与场外自选一致：新设备继承最近活跃且列表非空的真实设备 LOF 自选，
+        # default 存档不参与继承。
         source_row = conn.execute(
             """
             SELECT d.device_id
             FROM lof_watchlist_devices d
             WHERE d.device_id != ?
+              AND d.device_id != 'default'
               AND EXISTS (SELECT 1 FROM lof_watchlist w WHERE w.device_id = d.device_id)
             ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
             LIMIT 1

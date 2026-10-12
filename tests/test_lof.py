@@ -622,6 +622,14 @@ def test_lof_watchlist_new_device_inherits_recent_list(tmp_path):
     assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
 
 
+def test_lof_watchlist_new_device_never_inherits_default_archive(tmp_path):
+    service = make_service(tmp_path)
+    # default 存档里有旧全量 LOF 列表，但新设备不应从它继承
+    service.cache.add_lof_watchlist("160123", "存档LOF", device_id="default")
+
+    assert service.list_watchlist("brand-new") == []
+
+
 def test_lof_search_filters_non_lof(tmp_path):
     service = make_service(tmp_path)
 

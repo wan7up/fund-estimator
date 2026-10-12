@@ -113,6 +113,19 @@ def test_watchlist_new_device_inherits_recent_list(tmp_path, monkeypatch):
     assert [item["code"] for item in client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json()] == ["001438"]
 
 
+def test_watchlist_new_device_never_inherits_default_archive(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch)
+    # default 是历史合并存档：即使有全量旧列表，也永不做新设备的继承来源。
+    # 每个设备的底以真实设备删完剩下的为准。
+    cache = SQLiteCache(tmp_path / "api.sqlite3")
+    cache.add_watchlist("000001", "存档基金", device_id="default")
+
+    response = client.get("/api/watchlist", headers={"X-Device-Id": "brand-new"})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 

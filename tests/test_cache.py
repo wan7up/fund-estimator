@@ -28,11 +28,12 @@ def test_watchlist_schema_migration_keeps_legacy_default_rows(tmp_path):
     default_rows = cache.list_watchlist()
     phone_rows = cache.list_watchlist("phone-a")
 
+    # 旧表数据仍归 default 存档可读、可删，但新设备不再从存档继承：
+    # 每个设备的底以真实设备删完剩下的为准。
     assert [row["code"] for row in default_rows] == ["001438"]
-    assert [row["code"] for row in phone_rows] == ["001438"]
-    cache.delete_watchlist("001438", "phone-a")
-    assert cache.list_watchlist("phone-a") == []
-    assert [row["code"] for row in cache.list_watchlist()] == ["001438"]
+    assert phone_rows == []
+    cache.delete_watchlist("001438")
+    assert cache.list_watchlist() == []
 
 
 def test_watchlist_add_inserts_at_top_and_existing_moves_to_top(tmp_path):
