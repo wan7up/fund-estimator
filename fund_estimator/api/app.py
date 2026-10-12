@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -77,14 +78,16 @@ from fund_estimator.models.etf import EtfOpportunityResponse
 
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+DEVICE_ID_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 logger = logging.getLogger(__name__)
 
 
 def normalize_device_id(device_id: str | None) -> str:
-    # 单用户自部署：自选列表全局共享，忽略浏览器设备 ID。
-    # 之前按 X-Device-Id 分组，浏览器清缓存/换设备后列表就“丢了”（数据仍在库里），
-    # 全局化后列表只存服务端一份，任何浏览器看到的都是同一个列表。
-    return "default"
+    value = (device_id or "default").strip()
+    if not value:
+        return "default"
+    value = DEVICE_ID_PATTERN.sub("-", value)[:80].strip("-")
+    return value or "default"
 
 
 def int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:

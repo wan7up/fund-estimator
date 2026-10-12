@@ -148,7 +148,14 @@ class LofDailyNoticeScheduler:
 
         response = None
         if due_daily or due_afternoon:
+            # 每日摘要盯“最近活跃设备”的自选列表：单用户多浏览器场景下，
+            # 日报内容跟用户当前正在用的列表保持一致。
+            device_id = "default"
+            cache = getattr(self.monitor, "cache", None)
+            if cache is not None:
+                device_id = cache.most_recent_lof_watchlist_device()
             response = await self.monitor.get_opportunities(
+                device_id=device_id,
                 normal_threshold_pct=self.normal_threshold_pct,
                 strong_threshold_pct=self.strong_threshold_pct,
                 min_turnover_yuan=self.min_turnover_yuan,

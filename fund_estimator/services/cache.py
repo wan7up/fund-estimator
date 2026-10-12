@@ -85,10 +85,14 @@ class SQLiteCache:
             """
             CREATE TABLE IF NOT EXISTS watchlist_devices (
                 device_id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                last_active_at TEXT
             )
             """
         )
+        device_columns = conn.execute("PRAGMA table_info(watchlist_devices)").fetchall()
+        if "last_active_at" not in {row["name"] for row in device_columns}:
+            conn.execute("ALTER TABLE watchlist_devices ADD COLUMN last_active_at TEXT")
         conn.execute(
             """
             INSERT OR IGNORE INTO watchlist_devices (device_id, created_at)
@@ -119,25 +123,44 @@ class SQLiteCache:
             counters[device_id] = index + 1
 
     def _ensure_watchlist_device(self, conn: sqlite3.Connection, device_id: str) -> None:
+        now = datetime.now(UTC).isoformat()
         exists = conn.execute(
             "SELECT 1 FROM watchlist_devices WHERE device_id = ?",
             (device_id,),
         ).fetchone()
         if exists:
+            conn.execute(
+                "UPDATE watchlist_devices SET last_active_at = ? WHERE device_id = ?",
+                (now, device_id),
+            )
             return
         conn.execute(
-            "INSERT INTO watchlist_devices (device_id, created_at) VALUES (?, ?)",
-            (device_id, datetime.now(UTC).isoformat()),
+            "INSERT INTO watchlist_devices (device_id, created_at, last_active_at) VALUES (?, ?, ?)",
+            (device_id, now, now),
         )
-        if device_id == "default":
+        # 新设备首次出现：继承“最近活跃且列表非空”的那份列表，
+        # 这样浏览器清缓存/换设备后自动接上之前的自选，无需手动恢复。
+        source_row = conn.execute(
+            """
+            SELECT d.device_id
+            FROM watchlist_devices d
+            WHERE d.device_id != ?
+              AND EXISTS (SELECT 1 FROM watchlist w WHERE w.device_id = d.device_id)
+            ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+        if source_row is None:
             return
         rows = conn.execute(
             """
             SELECT code, name, added_at, sort_order
             FROM watchlist
-            WHERE device_id = 'default'
+            WHERE device_id = ?
             ORDER BY sort_order ASC, added_at ASC
-            """
+            """,
+            (source_row["device_id"],),
         ).fetchall()
         for row in rows:
             conn.execute(
@@ -147,6 +170,19 @@ class SQLiteCache:
                 """,
                 (device_id, row["code"], row["name"], row["added_at"], row["sort_order"]),
             )
+
+    def most_recent_watchlist_device(self) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT d.device_id
+                FROM watchlist_devices d
+                WHERE EXISTS (SELECT 1 FROM watchlist w WHERE w.device_id = d.device_id)
+                ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return row["device_id"] if row else "default"
 
     def get(self, namespace: str, key: str, *, include_expired: bool = False) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -267,10 +303,14 @@ class SQLiteCache:
             """
             CREATE TABLE IF NOT EXISTS lof_watchlist_devices (
                 device_id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                last_active_at TEXT
             )
             """
         )
+        lof_device_columns = conn.execute("PRAGMA table_info(lof_watchlist_devices)").fetchall()
+        if "last_active_at" not in {row["name"] for row in lof_device_columns}:
+            conn.execute("ALTER TABLE lof_watchlist_devices ADD COLUMN last_active_at TEXT")
         conn.execute(
             """
             INSERT OR IGNORE INTO lof_watchlist_devices (device_id, created_at)
@@ -280,16 +320,65 @@ class SQLiteCache:
         )
 
     def _ensure_lof_watchlist_device(self, conn: sqlite3.Connection, device_id: str) -> None:
+        now = datetime.now(UTC).isoformat()
         exists = conn.execute(
             "SELECT 1 FROM lof_watchlist_devices WHERE device_id = ?",
             (device_id,),
         ).fetchone()
         if exists:
+            conn.execute(
+                "UPDATE lof_watchlist_devices SET last_active_at = ? WHERE device_id = ?",
+                (now, device_id),
+            )
             return
         conn.execute(
-            "INSERT INTO lof_watchlist_devices (device_id, created_at) VALUES (?, ?)",
-            (device_id, datetime.now(UTC).isoformat()),
+            "INSERT INTO lof_watchlist_devices (device_id, created_at, last_active_at) VALUES (?, ?, ?)",
+            (device_id, now, now),
         )
+        # 与场外自选一致：新设备继承最近活跃且列表非空的 LOF 自选。
+        source_row = conn.execute(
+            """
+            SELECT d.device_id
+            FROM lof_watchlist_devices d
+            WHERE d.device_id != ?
+              AND EXISTS (SELECT 1 FROM lof_watchlist w WHERE w.device_id = d.device_id)
+            ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+        if source_row is None:
+            return
+        rows = conn.execute(
+            """
+            SELECT code, name, added_at, sort_order
+            FROM lof_watchlist
+            WHERE device_id = ?
+            ORDER BY sort_order ASC, added_at ASC
+            """,
+            (source_row["device_id"],),
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                """
+                INSERT INTO lof_watchlist (device_id, code, name, added_at, sort_order)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (device_id, row["code"], row["name"], row["added_at"], row["sort_order"]),
+            )
+
+    def most_recent_lof_watchlist_device(self) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT d.device_id
+                FROM lof_watchlist_devices d
+                WHERE EXISTS (SELECT 1 FROM lof_watchlist w WHERE w.device_id = d.device_id)
+                ORDER BY COALESCE(d.last_active_at, d.created_at) DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return row["device_id"] if row else "default"
 
     def list_lof_watchlist(self, device_id: str = "default") -> list[sqlite3.Row]:
         with self._connect() as conn:

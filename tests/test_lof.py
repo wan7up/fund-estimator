@@ -605,14 +605,21 @@ def test_high_single_day_official_premium_skips_cross_day_confirmation(tmp_path)
     assert "单日高折溢价信号，需确认当日估算净值" in item.risks
 
 
-def test_lof_watchlist_is_device_scoped(tmp_path):
+def test_lof_watchlist_new_device_inherits_recent_list(tmp_path):
     service = make_service(tmp_path)
 
     added = __import__("asyncio").run(service.add_watchlist("161128", "phone-a"))
 
     assert added.code == "161128"
     assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
+
+    # 新设备首次访问：自动继承最近活跃设备 phone-a 的列表
+    assert [item.code for item in service.list_watchlist("phone-b")] == ["161128"]
+
+    # 继承后各设备独立：phone-b 删除不影响 phone-a
+    assert service.delete_watchlist("161128", "phone-b") is True
     assert service.list_watchlist("phone-b") == []
+    assert [item.code for item in service.list_watchlist("phone-a")] == ["161128"]
 
 
 def test_lof_search_filters_non_lof(tmp_path):
@@ -1288,6 +1295,38 @@ def test_lof_notice_scheduler_sends_new_issue_after_daily_summary(tmp_path):
     assert sent_texts[1].startswith("【打新提醒】")
     assert source.calls == [date(2026, 6, 3)]
     assert monitor.calls and monitor.calls[0]["refresh"] is True
+
+
+def test_lof_notice_scheduler_uses_most_recent_device_for_summary(tmp_path):
+    first_now = datetime(2026, 6, 3, 2, 0, tzinfo=UTC)
+    response = LofOpportunityResponse(
+        scanned_at=first_now,
+        normal_threshold_pct=2.0,
+        strong_threshold_pct=5.0,
+        min_turnover_yuan=3_000_000,
+        core_count=0,
+        watchlist_count=0,
+        items=[],
+    )
+    monitor = DummyNoticeMonitor(response)
+    cache = SQLiteCache(tmp_path / "sched.sqlite3")
+    cache.add_lof_watchlist("161128", "核心LOF", "phone-recent")
+    monitor.cache = cache  # type: ignore[attr-defined]
+    config = LofNoticeConfig(
+        enabled=True,
+        app_id="cli_test",
+        app_secret="secret",
+        notice_dir=tmp_path,
+        daily_summary_time="10:00",
+    )
+    notice = LofNoticeService(config)
+    notice._send_feishu_openapi = lambda text, *, state: {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice)
+
+    __import__("asyncio").run(scheduler.run_once(now=first_now))
+
+    # 日报盯最近活跃设备的自选，而不是固定的 default
+    assert monitor.calls[0]["device_id"] == "phone-recent"
 
 
 def test_lof_notice_scheduler_retries_new_issue_after_empty_check(tmp_path):

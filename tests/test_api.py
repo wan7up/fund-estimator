@@ -93,22 +93,24 @@ def test_watchlist_reorder(tmp_path, monkeypatch):
     assert [item["code"] for item in watch_response.json()] == ["001438", "000001"]
 
 
-def test_watchlist_is_shared_across_devices(tmp_path, monkeypatch):
+def test_watchlist_new_device_inherits_recent_list(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch)
 
     response = client.post("/api/watchlist/001438", headers={"X-Device-Id": "phone-a"})
     assert response.status_code == 200
 
     phone_a = client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"})
-    phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
-
-    # 单用户自部署：设备 ID 被忽略，所有浏览器共享同一个服务端列表
     assert [item["code"] for item in phone_a.json()] == ["001438"]
+
+    # 新设备首次访问：自动继承最近活跃设备的自选列表
+    phone_b = client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"})
     assert [item["code"] for item in phone_b.json()] == ["001438"]
 
+    # 继承后各设备独立：phone-b 删除不影响 phone-a
     delete_response = client.delete("/api/watchlist/001438", headers={"X-Device-Id": "phone-b"})
     assert delete_response.status_code == 200
-    assert client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json() == []
+    assert client.get("/api/watchlist", headers={"X-Device-Id": "phone-b"}).json() == []
+    assert [item["code"] for item in client.get("/api/watchlist", headers={"X-Device-Id": "phone-a"}).json()] == ["001438"]
 
 
 def test_batch_estimate_returns_item_errors(tmp_path, monkeypatch):
