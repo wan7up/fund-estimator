@@ -11,10 +11,6 @@ const TOOLS = {
     path: "/arbitrage",
     title: "套利提醒",
   },
-  "ai-chat": {
-    path: "/ai-chat",
-    title: "AI咨询",
-  },
 };
 
 const DEFAULT_TOOL = "estimate";
