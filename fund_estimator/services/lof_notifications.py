@@ -743,10 +743,8 @@ class LofNoticeService:
             self._write_state(state, result, now=now)
             return result
         count = len(calendar.stocks) + len(calendar.bonds)
-        if count == 0:
-            result = self._state_result("no_new_issue_items", now=now, last_error=None, rows=[])
-            self._write_state(state, result, now=now)
-            return result
+        # 无申购也发一条"今日无新股/新债"，给用户明确的每日确认，
+        # 同时标记当天已完成，避免整个交易日反复重查。
         text = self._format_new_issue_reminder(calendar, now=now)
         row = {
             "created_at": now.isoformat(timespec="seconds"),
@@ -991,8 +989,11 @@ class LofNoticeService:
         local_now = now.astimezone(MARKET_TZ)
         lines = [
             f"【打新提醒】{local_now.strftime('%Y-%m-%d %H:%M')}",
-            f"今日可打新：新股 {len(calendar.stocks)} 只，新债 {len(calendar.bonds)} 只",
         ]
+        if not calendar.stocks and not calendar.bonds:
+            lines.append("今日无新股/新债申购")
+            return "\n".join(lines)
+        lines.append(f"今日可打新：新股 {len(calendar.stocks)} 只，新债 {len(calendar.bonds)} 只")
         if calendar.stocks:
             lines.extend(["", "新股："])
             for item in calendar.stocks[:10]:

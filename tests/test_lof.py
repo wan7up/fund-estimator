@@ -1329,7 +1329,7 @@ def test_lof_notice_scheduler_uses_most_recent_device_for_summary(tmp_path):
     assert monitor.calls[0]["device_id"] == "phone-recent"
 
 
-def test_lof_notice_scheduler_retries_new_issue_after_empty_check(tmp_path):
+def test_lof_notice_scheduler_sends_notice_when_no_new_issue(tmp_path):
     first_now = datetime(2026, 6, 3, 2, 0, tzinfo=UTC)
     response = LofOpportunityResponse(
         scanned_at=first_now,
@@ -1358,31 +1358,20 @@ def test_lof_notice_scheduler_retries_new_issue_after_empty_check(tmp_path):
     first = __import__("asyncio").run(scheduler.run_once(now=first_now))
     state = json.loads(config.state_path.read_text(encoding="utf-8"))
 
+    # 无申购也发一条明确提示，并标记当天已完成
     assert first["notice"]["status"] == "sent"
-    assert first["new_issue_notice"]["status"] == "no_new_issue_items"
+    assert first["new_issue_notice"]["status"] == "sent"
+    assert sent_texts[-1].endswith("今日无新股/新债申购")
     assert state["last_daily_summary_date"] == "2026-06-03"
-    assert state["last_ipo_check_at"] == "2026-06-03T02:00:00+00:00"
-    assert state.get("last_ipo_reminder_date") is None
-    assert scheduler.seconds_until_next_run(datetime(2026, 6, 3, 2, 5, tzinfo=UTC)) == 25 * 60
+    assert state["last_ipo_reminder_date"] == "2026-06-03"
 
-    bond_source = DummyNewIssueSource(
-        NewIssueCalendar(
-            target_date=date(2026, 6, 3),
-            stocks=[],
-            bonds=[NewIssueItem(kind="bond", code="113704", name="春风转债", apply_code="754129")],
-        )
-    )
-    notice_retry = LofNoticeService(config, new_issue_source=bond_source)
-    notice_retry._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
-    retry_scheduler = LofDailyNoticeScheduler(monitor=monitor, notice=notice_retry)
+    # 当天再跑：日报和打新都已发过，直接跳过，不再重查
+    second = __import__("asyncio").run(scheduler.run_once(now=datetime(2026, 6, 3, 2, 30, tzinfo=UTC)))
 
-    second = __import__("asyncio").run(retry_scheduler.run_once(now=datetime(2026, 6, 3, 2, 30, tzinfo=UTC)))
-
-    assert second["scan"] is None
-    assert second["new_issue_notice"]["status"] == "sent"
-    assert bond_source.calls == [date(2026, 6, 3)]
+    assert second == {"notice": {"status": "skipped_notice_schedule"}}
+    assert len(sent_texts) == 2
+    assert empty_source.calls == [date(2026, 6, 3)]
     assert len(monitor.calls) == 1
-    assert sent_texts[-1].startswith("【打新提醒】")
 
 
 def test_new_issue_reminder_sends_when_called_with_daily_notice(tmp_path):
@@ -1507,7 +1496,7 @@ def test_new_issue_reminder_omits_empty_stock_section_and_footer(tmp_path):
     ]
 
 
-def test_new_issue_reminder_skips_when_disabled_or_empty(tmp_path):
+def test_new_issue_reminder_skips_when_disabled_sends_when_empty(tmp_path):
     calendar = NewIssueCalendar(target_date=date(2026, 6, 3), stocks=[], bonds=[])
     source = DummyNewIssueSource(calendar)
     config = LofNoticeConfig(
@@ -1520,14 +1509,24 @@ def test_new_issue_reminder_skips_when_disabled_or_empty(tmp_path):
         ipo_reminder_enabled=False,
     )
     notice = LofNoticeService(config, new_issue_source=source)
-    notice._send_feishu_openapi = lambda text, *, state: {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
+    sent_texts: list[str] = []
+    notice._send_feishu_openapi = lambda text, *, state: sent_texts.append(text) or {"status": "sent", "provider": "unit"}  # type: ignore[method-assign]
 
     disabled = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 45, tzinfo=UTC)))
     notice.update_settings(ipo_reminder_enabled=True)
     empty = __import__("asyncio").run(notice.notify_new_issue_reminder(now=datetime(2026, 6, 3, 1, 50, tzinfo=UTC)))
 
     assert disabled["status"] == "ipo_reminder_disabled"
-    assert empty["status"] == "no_new_issue_items"
+    # 开启后当天无申购也发一条"无新股/新债"的明确提示
+    assert empty["status"] == "sent"
+    assert sent_texts == [
+        "\n".join(
+            [
+                "【打新提醒】2026-06-03 09:50",
+                "今日无新股/新债申购",
+            ]
+        )
+    ]
 
 
 def test_lof_notice_test_uses_alert_template(tmp_path):
