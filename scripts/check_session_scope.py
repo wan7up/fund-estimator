@@ -14,7 +14,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
     "orchestrator": (
         "README.md",
         ".env.example",
-        "协作说明.md",
+        "CODE_WIKI.md",
         ".dockerignore",
         ".gitignore",
         ".gitattributes",
@@ -84,7 +84,7 @@ SCOPES: dict[str, tuple[str, ...]] = {
 PROTECTED_BY_ORCHESTRATOR = (
     "README.md",
     ".env.example",
-    "协作说明.md",
+    "CODE_WIKI.md",
     ".dockerignore",
     ".gitignore",
     ".gitattributes",

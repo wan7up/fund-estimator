@@ -128,7 +128,6 @@ worktree/
 ├── pyproject.toml                    # 仅 pytest 配置
 ├── .env.example                      # 环境变量模板
 ├── README.md                         # 项目主文档（最权威的功能说明）
-├── 协作说明.md                        # 多 session 协作边界（见 §14）
 ├── SECURITY.md                       # 敏感信息约定
 └── LICENSE                           # Non-Commercial Personal Research License
 ```
@@ -584,7 +583,7 @@ git grep -n -I -E 'cfut_|ghp_|github_pat_|AKIA|AIza|xox[baprs]-|sk-[A-Za-z0-9_-]
 
 ---
 
-## 14. 多 Session 协作约定（协作说明.md）
+## 14. 多 Session 协作约定
 
 本项目曾用多个 Codex session 并行开发，靠 `scripts/check_session_scope.py` 约束修改边界（新 session 接手前必读）：
 
@@ -593,14 +592,14 @@ git grep -n -I -E 'cfut_|ghp_|github_pat_|AKIA|AIza|xox[baprs]-|sk-[A-Za-z0-9_-]
 
 | Role | 允许范围 |
 |---|---|
-| `orchestrator` | README、协作说明、Docker/compose、`.env.example`、`deploy/**`、`api/app.py`、`web/index.html`、`shell.js/css`、`manifest`、`services/compare_ai.py`、`check_session_scope.py` |
+| `orchestrator` | README、CODE_WIKI.md、Docker/compose、`.env.example`、`deploy/**`、`api/app.py`、`web/index.html`、`shell.js/css`、`manifest`、`services/compare_ai.py`、`check_session_scope.py` |
 | `estimate` | `estimate.html/app.js/styles.css` + 估值相关 API/模型/服务/测试 |
 | `arbitrage` | `arbitrage.html/lof_app.js/lof.css`、`vendor/qrcode.js` + LOF/ETF 相关文件 |
 | `compare` | `compare.html/compare_app.js/compare.css` + 对比相关文件 |
 
 > 原 `assistant`（AI 咨询）scope 已随工具整体移除而删除。
 
-**只有 orchestrator 可改**：README、协作说明、Docker 全家桶、`deploy/**`、`api/app.py`、shell 三件套、manifest、scope 脚本、`compare_ai.py`。改共享文件（如 `cache.py`、`schema.py`）需先说明理由并确认不破坏其它工具。
+**只有 orchestrator 可改**：README、CODE_WIKI.md、Docker 全家桶、`deploy/**`、`api/app.py`、shell 三件套、manifest、scope 脚本、`compare_ai.py`。改共享文件（如 `cache.py`、`schema.py`）需先说明理由并确认不破坏其它工具。
 
 **新增工具模式**：新页面 + 新 JS/CSS → `index.html` 加 tab + iframe pane → `shell.js` TOOLS 加配置 → `app.py` 加 `/new-tool` 和 `/tool/new-tool` 路由 → 不把逻辑塞进已有工具 JS。
 
